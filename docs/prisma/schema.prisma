@@ -1,0 +1,574 @@
+// schema.prisma – Modelo inicial recomendado
+// Ajustar provider/url según el entorno real.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CompanyStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+  CANCELLED
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  INVITED
+}
+
+enum RoleScope {
+  PLATFORM
+  COMPANY
+}
+
+enum CampaignStatus {
+  DRAFT
+  AI_GENERATED
+  IN_REVIEW
+  APPROVED
+  SCHEDULED
+  PUBLISHED
+  PAUSED
+  FINISHED
+  REJECTED
+  FAILED
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  CONVERTED
+  LOST
+}
+
+enum CustomerType {
+  LEAD
+  CUSTOMER
+  PROSPECT
+}
+
+enum ContentType {
+  FLYER
+  COPY
+  STORY
+  POST
+  CAROUSEL
+  WHATSAPP_MESSAGE
+  CHATBOT_RESPONSE
+  VIDEO
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  TRIAL
+}
+
+model PlatformUser {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  isSuper   Boolean  @default(false)
+
+  managedCompanies Company[]
+  auditLogs        AuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Company {
+  id             String        @id @default(cuid())
+  legalName      String?
+  commercialName String
+  taxId          String?
+  sector         String?
+  country        String?
+  city           String?
+  zone           String?
+  address        String?
+  phone          String?
+  whatsapp       String?
+  email          String?
+  website        String?
+  status         CompanyStatus @default(TRIAL)
+
+  createdById    String?
+  createdBy      PlatformUser? @relation(fields: [createdById], references: [id])
+
+  brandProfile   BrandProfile?
+
+  users           CompanyUser[]
+  roles           Role[]
+  products        Product[]
+  customers       Customer[]
+  campaigns       Campaign[]
+  contentAssets   ContentAsset[]
+  segments        Segment[]
+  automationRules AutomationRule[]
+  subscriptions   Subscription[]
+  integrations    Integration[]
+  competitors     Competitor[]
+  auditLogs       AuditLog[]
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model BrandProfile {
+  id                       String   @id @default(cuid())
+  empresaId                 String   @unique
+  company                  Company  @relation(fields: [empresaId], references: [id])
+
+  logoUrl                  String?
+  secondaryLogoUrl          String?
+  primaryColor             String?
+  secondaryColor           String?
+  accentColor              String?
+  typographyMain           String?
+  typographySecondary      String?
+  brandTone                String?
+  slogan                   String?
+  description              String?
+  visualRestrictions       String?
+  communicationGuidelines  String?
+  brandManualUrl           String?
+
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+}
+
+model CompanyUser {
+  id        String     @id @default(cuid())
+  empresaId String
+  company   Company    @relation(fields: [empresaId], references: [id])
+
+  name      String
+  email     String
+  password  String?
+  phone     String?
+  status    UserStatus @default(INVITED)
+
+  roles     UserRole[]
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@unique([empresaId, email])
+  @@index([empresaId])
+}
+
+model Role {
+  id                       String     @id @default(cuid())
+  empresaId                 String?
+  company                  Company?   @relation(fields: [empresaId], references: [id])
+
+  name                     String
+  key                      String?
+  description              String?
+  scope                    RoleScope
+  hashPermission           String?
+  permissionSchemaVersion  Int        @default(1)
+
+  users                    UserRole[]
+  permissions              RolePermission[]
+
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
+
+  @@index([empresaId])
+  @@unique([empresaId, key])
+}
+
+model UserRole {
+  id            String      @id @default(cuid())
+  companyUserId String
+  roleId        String
+
+  user          CompanyUser @relation(fields: [companyUserId], references: [id])
+  role          Role        @relation(fields: [roleId], references: [id])
+
+  createdAt     DateTime    @default(now())
+
+  @@unique([companyUserId, roleId])
+}
+
+model Module {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  scope       RoleScope
+  route       String?
+  icon        String?
+  category    String?
+  parentId    String?
+  isMenu      Boolean  @default(true)
+  isActive    Boolean  @default(true)
+  description String?
+
+  parent      Module?  @relation("ModuleTree", fields: [parentId], references: [id])
+  children    Module[] @relation("ModuleTree")
+
+  permissions RolePermission[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model RolePermission {
+  id        String @id @default(cuid())
+  roleId    String
+  moduleId  String
+
+  canRead   Boolean @default(false)
+  canCreate Boolean @default(false)
+  canUpdate Boolean @default(false)
+  canDelete Boolean @default(false)
+  actions   Json?
+
+  role      Role   @relation(fields: [roleId], references: [id])
+  module    Module @relation(fields: [moduleId], references: [id])
+
+  @@unique([roleId, moduleId])
+}
+
+model Product {
+  id                       String   @id @default(cuid())
+  empresaId                 String
+  company                  Company  @relation(fields: [empresaId], references: [id])
+
+  name                     String
+  category                 String?
+  brand                    String?
+  description              String?
+  basePrice                Decimal?
+  imageUrl                 String?
+  isActive                 Boolean  @default(true)
+  productType              String?
+  estimatedRepurchaseDays  Int?
+  tags                     String[]
+  targetAudience           String?
+  keywords                 String[]
+
+  campaigns                CampaignProduct[]
+  saleItems                SaleItem[]
+
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@index([empresaId])
+}
+
+model Customer {
+  id        String       @id @default(cuid())
+  empresaId String
+  company   Company      @relation(fields: [empresaId], references: [id])
+
+  name      String?
+  phone     String?
+  whatsapp  String?
+  email     String?
+  city      String?
+  zone      String?
+  type      CustomerType @default(LEAD)
+  source    String?
+  notes     String?
+
+  segments  CustomerSegment[]
+  leads     Lead[]
+  sales     Sale[]
+
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([empresaId])
+  @@index([phone])
+  @@index([whatsapp])
+}
+
+model Segment {
+  id          String   @id @default(cuid())
+  empresaId   String
+  company     Company  @relation(fields: [empresaId], references: [id])
+
+  name        String
+  description String?
+  criteria    Json?
+  isAutomatic Boolean  @default(false)
+
+  customers   CustomerSegment[]
+  campaigns   Campaign[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([empresaId])
+}
+
+model CustomerSegment {
+  id         String   @id @default(cuid())
+  customerId String
+  segmentId  String
+
+  customer   Customer @relation(fields: [customerId], references: [id])
+  segment    Segment  @relation(fields: [segmentId], references: [id])
+
+  createdAt  DateTime @default(now())
+
+  @@unique([customerId, segmentId])
+}
+
+model Campaign {
+  id               String         @id @default(cuid())
+  empresaId         String
+  company          Company        @relation(fields: [empresaId], references: [id])
+
+  segmentId        String?
+  segment          Segment?       @relation(fields: [segmentId], references: [id])
+
+  name             String
+  objective        String?
+  description      String?
+  status           CampaignStatus @default(DRAFT)
+
+  budget           Decimal?
+  startDate        DateTime?
+  endDate          DateTime?
+  scheduledAt      DateTime?
+
+  requiresApproval Boolean        @default(true)
+  autoPublish      Boolean        @default(false)
+
+  products         CampaignProduct[]
+  contentAssets    ContentAsset[]
+  leads            Lead[]
+
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([empresaId])
+  @@index([status])
+}
+
+model CampaignProduct {
+  id         String   @id @default(cuid())
+  campaignId String
+  productId  String
+
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+  product    Product  @relation(fields: [productId], references: [id])
+
+  @@unique([campaignId, productId])
+}
+
+model ContentAsset {
+  id         String      @id @default(cuid())
+  empresaId  String
+  company    Company     @relation(fields: [empresaId], references: [id])
+
+  campaignId String?
+  campaign   Campaign?   @relation(fields: [campaignId], references: [id])
+
+  type       ContentType
+  title      String?
+  copy       String?
+  mediaUrl   String?
+  templateId String?
+  aiPrompt   String?
+  aiOutput   Json?
+
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@index([empresaId])
+}
+
+model Lead {
+  id         String     @id @default(cuid())
+  empresaId  String
+  company    Company    @relation(fields: [empresaId], references: [id])
+
+  customerId String?
+  customer   Customer?  @relation(fields: [customerId], references: [id])
+
+  campaignId String?
+  campaign   Campaign?  @relation(fields: [campaignId], references: [id])
+
+  source     String?
+  message    String?
+  status     LeadStatus @default(NEW)
+  assignedTo String?
+
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  @@index([empresaId])
+}
+
+model Sale {
+  id          String    @id @default(cuid())
+  empresaId   String
+  customerId  String
+
+  customer    Customer  @relation(fields: [customerId], references: [id])
+  items       SaleItem[]
+
+  totalAmount Decimal?
+  saleDate    DateTime  @default(now())
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([empresaId])
+}
+
+model SaleItem {
+  id        String   @id @default(cuid())
+  saleId    String
+  productId String
+
+  sale      Sale     @relation(fields: [saleId], references: [id])
+  product   Product  @relation(fields: [productId], references: [id])
+
+  quantity  Int      @default(1)
+  unitPrice Decimal?
+}
+
+model AutomationRule {
+  id          String   @id @default(cuid())
+  empresaId   String
+  company     Company  @relation(fields: [empresaId], references: [id])
+
+  name        String
+  description String?
+  trigger     String
+  conditions  Json?
+  actions     Json?
+  isActive    Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([empresaId])
+}
+
+model Integration {
+  id           String   @id @default(cuid())
+  empresaId    String
+  company      Company  @relation(fields: [empresaId], references: [id])
+
+  provider     String
+  accountId    String?
+  accessToken  String?
+  refreshToken String?
+  metadata     Json?
+  isActive     Boolean  @default(true)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([empresaId])
+}
+
+model Plan {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  monthlyPrice    Decimal?
+  campaignLimit   Int?
+  userLimit       Int?
+  aiCreditLimit   Int?
+  isActive        Boolean  @default(true)
+
+  subscriptions   Subscription[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Subscription {
+  id          String             @id @default(cuid())
+  empresaId   String
+  company     Company            @relation(fields: [empresaId], references: [id])
+
+  planId      String?
+  plan        Plan?              @relation(fields: [planId], references: [id])
+
+  planName    String
+  status      SubscriptionStatus @default(TRIAL)
+  monthlyPrice Decimal?
+  campaignLimit Int?
+  userLimit     Int?
+  aiCreditLimit Int?
+  startsAt    DateTime?
+  renewsAt    DateTime?
+
+  payments    Payment[]
+
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@index([empresaId])
+}
+
+model Payment {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
+
+  amount         Decimal
+  currency       String       @default("COP")
+  status         String
+  paidAt         DateTime?
+  metadata       Json?
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model Competitor {
+  id           String   @id @default(cuid())
+  empresaId    String
+  company      Company  @relation(fields: [empresaId], references: [id])
+
+  name         String
+  website      String?
+  facebookUrl  String?
+  instagramUrl String?
+  notes        String?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([empresaId])
+}
+
+model AuditLog {
+  id             String        @id @default(cuid())
+  empresaId       String?
+  company        Company?      @relation(fields: [empresaId], references: [id])
+  platformUserId String?
+  platformUser   PlatformUser? @relation(fields: [platformUserId], references: [id])
+
+  actorType      String
+  actorId        String?
+  action         String
+  entity         String?
+  entityId       String?
+  metadata       Json?
+
+  createdAt      DateTime      @default(now())
+
+  @@index([empresaId])
+  @@index([action])
+}

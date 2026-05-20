@@ -1,0 +1,59 @@
+{
+  "epics": [
+    {
+      "id": "EPIC-010",
+      "title": "Scrum Dev Tool",
+      "description": "Gestion interna del desarrollo",
+      "priority": "P0",
+      "status": "Ready"
+    }
+  ],
+  "stories": [
+    {
+      "id": "STORY-SCRUM-001",
+      "epicId": "EPIC-010",
+      "title": "Backlog persistente en .scrum/scrum-db.json",
+      "userStory": "Como Product Manager quiero un backlog persistente para evitar hardcode.",
+      "app": "WEB",
+      "module": "scrum",
+      "priority": "P0",
+      "status": "Backlog",
+      "points": 5,
+      "decisionRecordIds": [
+        "DR-006"
+      ],
+      "acceptanceCriteria": [
+        "Existe .scrum/scrum-db.json en la raiz del proyecto",
+        "Se puede leer/escribir epics, stories y tasks"
+      ],
+      "requiredTests": [
+        "Lectura de archivo",
+        "Persistencia de cambios"
+      ],
+      "notes": "",
+      "updatedAt": "2026-05-20T13:46:19.406Z"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "TASK-SCRUM-001",
+      "storyId": "STORY-SCRUM-001",
+      "title": "Crear estructura inicial de scrum-db",
+      "ownerRole": "Backend Engineer",
+      "status": "ToDo",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Archivo existe",
+          "done": false
+        },
+        {
+          "id": "T2",
+          "label": "JSON valido",
+          "done": false
+        }
+      ],
+      "updatedAt": "2026-05-20T13:46:17.742Z"
+    }
+  ]
+}

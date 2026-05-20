@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "description": "Schema de permisos dinámicos por módulo con CRUD + acciones especiales para sidebar y backend.",
+  "moduleShape": {
+    "key": "string",
+    "name": "string",
+    "scope": "PLATFORM | COMPANY",
+    "route": "string | null",
+    "icon": "string | null",
+    "category": "string | null",
+    "parentKey": "string | null",
+    "isMenu": true,
+    "isActive": true,
+    "permissions": {
+      "read": "boolean",
+      "create": "boolean",
+      "update": "boolean",
+      "delete": "boolean",
+      "actions": {
+        "approve": "boolean optional",
+        "publish": "boolean optional",
+        "pause": "boolean optional",
+        "schedule": "boolean optional",
+        "export": "boolean optional",
+        "import": "boolean optional",
+        "assign": "boolean optional",
+        "generateWithAI": "boolean optional",
+        "accessAsSupport": "boolean optional",
+        "suspend": "boolean optional",
+        "applyDiscount": "boolean optional"
+      }
+    }
+  },
+  "example": {
+    "version": 1,
+    "syncedAt": "2026-05-04T00:00:00.000Z",
+    "modules": [
+      {
+        "key": "campaigns",
+        "name": "Campañas",
+        "scope": "COMPANY",
+        "route": "/app/campaigns",
+        "icon": "Megaphone",
+        "category": "Marketing",
+        "parentKey": null,
+        "isMenu": true,
+        "isActive": true,
+        "permissions": {
+          "read": true,
+          "create": true,
+          "update": true,
+          "delete": false,
+          "actions": {
+            "approve": true,
+            "publish": false,
+            "pause": true,
+            "schedule": true
+          }
+        }
+      }
+    ]
+  },
+  "sidebarRules": [
+    "Mostrar módulo si permissions.read === true.",
+    "Mostrar padre si tiene hijos visibles aunque parent.read sea false.",
+    "Ocultar módulos inactive.",
+    "Si no hay permisos true, no mostrar.",
+    "El backend siempre valida de nuevo."
+  ],
+  "syncRules": [
+    "Al crear módulo, agregarlo a todos los roles con permisos false.",
+    "Al login, comparar hashPermission contra Module.",
+    "Mantener permisos existentes.",
+    "Re-cifrar si hubo cambios.",
+    "Incrementar version y syncedAt."
+  ]
+}
