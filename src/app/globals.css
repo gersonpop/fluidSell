@@ -43,6 +43,44 @@ body {
   backdrop-filter: blur(10px) saturate(125%);
 }
 
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.glass-shell {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 -20px 40px rgba(2, 8, 23, 0.28),
+    0 20px 60px rgba(2, 8, 23, 0.35);
+}
+
+.glass-sheen {
+  filter: blur(0.5px);
+  opacity: 0.72;
+  animation: sheen-slide 7s ease-in-out infinite;
+}
+
+@keyframes sheen-slide {
+  0% {
+    transform: translateX(-7%);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translateX(5%);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateX(-7%);
+    opacity: 0.55;
+  }
+}
+
 .hex-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

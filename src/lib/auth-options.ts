@@ -34,7 +34,22 @@ if (process.env.AUTH_LINKEDIN_ID && process.env.AUTH_LINKEDIN_SECRET) {
 
 export const authOptions: NextAuthOptions = {
   providers,
-  secret: process.env.AUTH_SECRET,
+  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+  callbacks: {
+    async jwt({token, profile}) {
+      const googleProfile = profile as {picture?: string} | undefined;
+      if (googleProfile?.picture) {
+        token.picture = googleProfile.picture;
+      }
+      return token;
+    },
+    async session({session, token}) {
+      if (session.user && typeof token.picture === "string") {
+        session.user.image = token.picture;
+      }
+      return session;
+    }
+  },
   session: {
     strategy: "jwt"
   }

@@ -17,7 +17,7 @@ export function SocialAuthButtons({
   linkedInLabel,
   disclaimer
 }: SocialAuthButtonsProps) {
-  const callbackUrl = `/${locale}`;
+  const callbackUrl = `/${locale}/home`;
 
   return (
     <div className="mt-5 space-y-3 lg:mt-6 lg:space-y-4">
