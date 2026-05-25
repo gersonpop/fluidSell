@@ -1,41 +1,39 @@
 "use client";
 
 import {signOut} from "next-auth/react";
+import Link from "next/link";
+import Image from "next/image";
+import {usePathname} from "next/navigation";
 import {useEffect, useMemo, useRef, useState} from "react";
+import {filterNavItemsByPermissions, mergeDynamicModules, NAV_ITEMS, type DynamicModuleNav} from "@/lib/sidebar-access";
 
-type SidebarMode = "hidden" | "compact" | "auto" | "fixed";
+type SidebarMode = "compact" | "auto" | "fixed";
 
 type ProtectedSidebarLayoutProps = {
   locale: string;
   userName: string;
   userEmail: string;
   userImage: string | null;
+  permissions?: string[];
+  dynamicModules?: DynamicModuleNav[];
+  title?: string;
+  description?: string;
+  children?: React.ReactNode;
 };
 
-type NavItem = {
-  id: string;
-  label: string;
-  icon: string;
-  badge?: string;
-};
-
-const navItems: NavItem[] = [
-  {id: "home", label: "Resumen", icon: "⌂"},
-  {id: "orders", label: "Pedidos", icon: "▣", badge: "24"},
-  {id: "products", label: "Catalogo", icon: "◫"},
-  {id: "customers", label: "Clientes", icon: "◎"},
-  {id: "invoices", label: "Facturas", icon: "◧"},
-  {id: "analytics", label: "Analitica", icon: "◍", badge: "Nuevo"},
-  {id: "campaigns", label: "Campanas", icon: "✦"},
-  {id: "warehouse", label: "Inventario", icon: "◨"},
-  {id: "support", label: "Soporte", icon: "?"},
-  {id: "teams", label: "Equipos", icon: "◉"},
-  {id: "integrations", label: "Integraciones", icon: "⛁"},
-  {id: "billing", label: "Facturacion", icon: "$"}
-];
-
-export function ProtectedSidebarLayout({locale, userName, userEmail, userImage}: ProtectedSidebarLayoutProps) {
-  const [mode, setMode] = useState<SidebarMode>("auto");
+export function ProtectedSidebarLayout({
+  locale,
+  userName,
+  userEmail,
+  userImage,
+  permissions = [],
+  dynamicModules = [],
+  title = "Bienvenido",
+  description = "Ingresaste con Google. Este panel simula datos de operacion, actividad de ventas y estado general para validar la interfaz protegida.",
+  children
+}: ProtectedSidebarLayoutProps) {
+  const pathname = usePathname();
+  const [mode, setMode] = useState<SidebarMode>("fixed");
   const [hoverExpanded, setHoverExpanded] = useState(false);
   const [darkPanel, setDarkPanel] = useState(true);
   const [showModeMenu, setShowModeMenu] = useState(false);
@@ -47,13 +45,17 @@ export function ProtectedSidebarLayout({locale, userName, userEmail, userImage}:
 
   const expanded = mode === "fixed" || (mode === "auto" && hoverExpanded);
   const compact = mode === "compact" || (mode === "auto" && !hoverExpanded);
-  const hidden = mode === "hidden";
+  const hidden = false;
 
   const sidebarWidthClass = useMemo(() => {
-    if (hidden) return "w-0";
     if (expanded) return "w-[290px]";
-    return "w-[88px]";
-  }, [expanded, hidden]);
+    return "w-[96px]";
+  }, [expanded]);
+
+  const navItems = useMemo(() => {
+    const filtered = filterNavItemsByPermissions(NAV_ITEMS, permissions);
+    return mergeDynamicModules(filtered, dynamicModules);
+  }, [permissions, dynamicModules]);
 
   const updateScrollHints = () => {
     const element = navScrollRef.current;
@@ -77,9 +79,9 @@ export function ProtectedSidebarLayout({locale, userName, userEmail, userImage}:
   return (
     <main
       className="relative flex h-dvh overflow-hidden bg-cover bg-center bg-no-repeat"
-      style={{backgroundImage: "url('/images/login-backgorund.jpeg')"}}
+      style={{backgroundImage: "url('/images/home-brackgorund.png')"}}
     >
-      <div className="absolute inset-0 bg-slate-950/40" />
+      <div className="absolute inset-0 bg-white/5" />
 
       <aside
         onMouseEnter={() => mode === "auto" && setHoverExpanded(true)}
@@ -89,24 +91,38 @@ export function ProtectedSidebarLayout({locale, userName, userEmail, userImage}:
         }`}
       >
         <div
-          className={`h-full p-4 ${
+          className={`h-full ${compact ? "p-2" : "p-4"} ${
             darkPanel
               ? "bg-gradient-to-b from-slate-900/78 via-indigo-900/52 to-slate-950/86"
               : "bg-gradient-to-b from-sky-700/45 via-indigo-700/30 to-slate-900/56"
           } backdrop-blur-xl`}
         >
-          <div className="glass-shell relative flex h-full flex-col overflow-hidden rounded-2xl border border-white/20 bg-white/10 backdrop-blur-xl">
-            <span className="glass-sheen pointer-events-none absolute -left-14 top-[-24%] h-[52%] w-[145%] rotate-[14deg] bg-gradient-to-r from-transparent via-white/18 to-transparent" />
-            <span className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-white/20 via-white/7 to-transparent" />
-            <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/55" />
-            <span className="pointer-events-none absolute inset-[2px] rounded-[14px] border border-white/12" />
-            <div className="shrink-0 border-b border-white/18 p-4">
+          <div
+            className={`relative flex h-full flex-col overflow-hidden ${
+              compact
+                ? "rounded-none border-0 bg-transparent backdrop-blur-none"
+                : "glass-shell rounded-2xl border border-white/20 bg-white/10 backdrop-blur-xl"
+            }`}
+          >
+            {compact ? null : (
+              <>
+                <span className="glass-sheen pointer-events-none absolute -left-14 top-[-24%] h-[52%] w-[145%] rotate-[14deg] bg-gradient-to-r from-transparent via-white/18 to-transparent" />
+                <span className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-white/20 via-white/7 to-transparent" />
+                <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/55" />
+                <span className="pointer-events-none absolute inset-[2px] rounded-[14px] border border-white/12" />
+              </>
+            )}
+            <div className={`shrink-0 ${compact ? "p-2" : "border-b border-white/18 p-4"}`}>
               <div className={`flex items-center ${expanded ? "gap-3" : "justify-center"}`}>
                 <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-full border border-white/30 bg-white/10">
                   {userImage && !avatarError ? (
-                    <img
+                    <Image
                       src={userImage}
                       alt={userName}
+                      width={44}
+                      height={44}
+                      referrerPolicy="no-referrer"
+                      unoptimized
                       onError={() => setAvatarError(true)}
                       className="h-full w-full object-cover"
                     />
@@ -125,7 +141,7 @@ export function ProtectedSidebarLayout({locale, userName, userEmail, userImage}:
               </div>
             </div>
 
-            <div className="relative min-h-0 flex-1 px-2 py-3">
+            <div className={`relative min-h-0 flex-1 ${compact ? "px-0 py-4" : "px-2 py-3"}`}>
               <button
                 type="button"
                 aria-label="Subir modulos"
@@ -161,18 +177,26 @@ export function ProtectedSidebarLayout({locale, userName, userEmail, userImage}:
                 onScroll={updateScrollHints}
                 className="hide-scrollbar relative h-full overflow-y-auto"
               >
+              {compact ? <div className="mx-auto mb-3 h-px w-8 bg-white/20" /> : null}
               <p className={`px-2 pb-2 text-[10px] uppercase tracking-[0.18em] text-white/55 ${compact ? "text-center" : ""}`}>
                 {compact ? "Menu" : "Modulos"}
               </p>
-              <nav className="space-y-1">
-                {navItems.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
+              <nav className={compact ? "space-y-2" : "space-y-1"}>
+                {navItems.map((item) => {
+                  const href = `/${locale}${item.path}`;
+                  const isActive = pathname === href;
+                  return (
+                  <Link
+                    key={href}
+                    href={href}
                     className={`group flex w-full items-center text-left text-white/90 transition duration-300 ${
-                      expanded
-                        ? "gap-3 rounded-xl border border-transparent px-2 py-2 hover:border-white/20 hover:bg-white/12"
-                        : "justify-center px-0 py-1.5 hover:text-white"
+                      isActive
+                        ? expanded
+                          ? "gap-3 rounded-xl border border-cyan-300/40 bg-cyan-300/15 px-2 py-2"
+                          : "justify-center rounded-lg bg-cyan-300/20 px-0 py-2.5 text-cyan-100"
+                        : expanded
+                          ? "gap-3 rounded-xl border border-transparent px-2 py-2 hover:border-white/20 hover:bg-white/12"
+                          : "justify-center rounded-lg px-0 py-2.5 hover:bg-white/10 hover:text-white"
                     }`}
                   >
                     <span className={`grid place-items-center text-[22px] leading-none text-white/95 ${expanded ? "h-9 w-9" : "h-7 w-7"}`}>
@@ -188,22 +212,30 @@ export function ProtectedSidebarLayout({locale, userName, userEmail, userImage}:
                         ) : null}
                       </>
                     ) : null}
-                  </button>
-                ))}
+                  </Link>
+                );})}
               </nav>
               </div>
             </div>
 
-            <div className="shrink-0 border-t border-white/18 p-3">
+            <div className={`shrink-0 ${compact ? "border-t border-white/12 p-2" : "border-t border-white/18 p-3"}`}>
               <div className="space-y-2">
                 <div className="relative">
                   <button
                     type="button"
                     onClick={() => {
+                      if (compact) {
+                        setMode("fixed");
+                        setHoverExpanded(true);
+                      }
                       setShowModeMenu((prev) => !prev);
                       setShowThemeMenu(false);
                     }}
-                    className={`flex w-full items-center rounded-xl border border-white/20 bg-white/8 px-2 py-2 text-white transition duration-300 hover:bg-white/14 ${
+                    className={`flex w-full items-center px-2 py-2 text-white transition duration-300 ${
+                      compact
+                        ? "justify-center rounded-lg border-0 bg-transparent hover:bg-white/10"
+                        : "rounded-xl border border-white/20 bg-white/8 hover:bg-white/14"
+                    } ${
                       expanded ? "gap-3" : "justify-center"
                     }`}
                   >
@@ -223,7 +255,6 @@ export function ProtectedSidebarLayout({locale, userName, userEmail, userImage}:
                       }`}
                     >
                       {([
-                        ["hidden", "Oculta"],
                         ["compact", "Compacta"],
                         ["auto", "Auto ocultable"],
                         ["fixed", "Fija"]
@@ -250,10 +281,18 @@ export function ProtectedSidebarLayout({locale, userName, userEmail, userImage}:
                   <button
                     type="button"
                     onClick={() => {
+                      if (compact) {
+                        setMode("fixed");
+                        setHoverExpanded(true);
+                      }
                       setShowThemeMenu((prev) => !prev);
                       setShowModeMenu(false);
                     }}
-                    className={`flex w-full items-center rounded-xl border border-white/20 bg-white/8 px-2 py-2 text-white transition duration-300 hover:bg-white/14 ${
+                    className={`flex w-full items-center px-2 py-2 text-white transition duration-300 ${
+                      compact
+                        ? "justify-center rounded-lg border-0 bg-transparent hover:bg-white/10"
+                        : "rounded-xl border border-white/20 bg-white/8 hover:bg-white/14"
+                    } ${
                       expanded ? "gap-3" : "justify-center"
                     }`}
                   >
@@ -303,7 +342,11 @@ export function ProtectedSidebarLayout({locale, userName, userEmail, userImage}:
                 <button
                   type="button"
                   onClick={() => signOut({callbackUrl: `/${locale}`})}
-                  className={`flex w-full items-center rounded-xl border border-rose-300/40 bg-rose-300/15 px-2 py-2 text-rose-100 transition duration-300 hover:bg-rose-300/25 ${
+                  className={`flex w-full items-center px-2 py-2 transition duration-300 ${
+                    compact
+                      ? "justify-center rounded-lg border-0 bg-transparent text-rose-100 hover:bg-rose-300/20"
+                      : "rounded-xl border border-rose-300/40 bg-rose-300/15 text-rose-100 hover:bg-rose-300/25"
+                  } ${
                     expanded ? "gap-3" : "justify-center"
                   }`}
                 >
@@ -316,42 +359,31 @@ export function ProtectedSidebarLayout({locale, userName, userEmail, userImage}:
         </div>
       </aside>
 
-      {hidden ? (
-        <button
-          type="button"
-          onClick={() => setMode("auto")}
-          className="absolute left-4 top-1/2 z-30 -translate-y-1/2 rounded-full border border-white/40 bg-white/20 p-3 text-white backdrop-blur-md transition hover:bg-white/30"
-          aria-label="Mostrar sidebar"
-        >
-          ≡
-        </button>
-      ) : null}
-
       <section className="relative z-10 min-w-0 flex-1 p-4 md:p-6">
         <div className="h-full overflow-hidden rounded-3xl border border-white/20 bg-white/16 p-6 backdrop-blur-md">
           <div className="mb-6 border-b border-white/20 pb-4">
-            <h1 className="text-3xl font-semibold tracking-tight text-white">Bienvenido</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-white/85">
-              Ingresaste con Google. Este panel simula datos de operacion, actividad de ventas y estado general para validar la interfaz protegida.
-            </p>
+            <h1 className="text-3xl font-semibold tracking-tight text-white">{title}</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-white/85">{description}</p>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {[
-              ["Ventas Hoy", "$14,290", "+12%"],
-              ["Pedidos Pendientes", "38", "-4"],
-              ["Conversion", "4.8%", "+0.6"],
-              ["Ticket Promedio", "$86", "+3%"],
-              ["Clientes Activos", "1,204", "+18"],
-              ["Incidencias", "2", "-1"]
-            ].map(([title, value, delta]) => (
-              <article key={title} className="rounded-2xl border border-white/25 bg-slate-950/30 p-4 backdrop-blur-md">
-                <p className="text-xs uppercase tracking-[0.14em] text-white/65">{title}</p>
-                <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
-                <p className="mt-1 text-sm text-cyan-200">{delta}</p>
-              </article>
-            ))}
-          </div>
+          {children ?? (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {[
+                ["Ventas Hoy", "$14,290", "+12%"],
+                ["Pedidos Pendientes", "38", "-4"],
+                ["Conversion", "4.8%", "+0.6"],
+                ["Ticket Promedio", "$86", "+3%"],
+                ["Clientes Activos", "1,204", "+18"],
+                ["Incidencias", "2", "-1"]
+              ].map(([metricTitle, value, delta]) => (
+                <article key={metricTitle} className="rounded-2xl border border-white/25 bg-slate-950/30 p-4 backdrop-blur-md">
+                  <p className="text-xs uppercase tracking-[0.14em] text-white/65">{metricTitle}</p>
+                  <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+                  <p className="mt-1 text-sm text-cyan-200">{delta}</p>
+                </article>
+              ))}
+            </div>
+          )}
         </div>
       </section>
     </main>

@@ -1,7 +1,10 @@
 import {getTranslations, setRequestLocale} from "next-intl/server";
+import {getServerSession} from "next-auth";
+import {redirect} from "next/navigation";
 import {LanguageSwitcher} from "@/components/language-switcher";
 import {LoginShowcase} from "@/components/login-showcase";
 import {SocialAuthButtons} from "@/components/social-auth-buttons";
+import {authOptions} from "@/lib/auth-options";
 
 type HomePageProps = {
   params: Promise<{locale: string}>;
@@ -9,6 +12,12 @@ type HomePageProps = {
 
 export default async function HomePage({params}: HomePageProps) {
   const {locale} = await params;
+  const session = await getServerSession(authOptions);
+
+  if (session?.user) {
+    redirect(`/${locale}/home`);
+  }
+
   setRequestLocale(locale);
   const t = await getTranslations({locale, namespace: "HomePage"});
   const slides = [1, 2, 3, 4, 5].map((item) => ({

@@ -56,6 +56,11 @@ Para no bloquear el trabajo, se instalaron manualmente desde repos oficiales en 
 - `verification-before-completion`
 - `using-git-worktrees`
 
+## Skills locales del proyecto (custom)
+
+- `.agent/skill-settings-config-crud-pattern.md`
+  - Estandar para construir paginas de Settings con tabla, busqueda, boton agregar y formulario de creacion/edicion conectados a API dinamica y BD.
+
 ## Comando base de instalacion
 
 ```bash

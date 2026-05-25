@@ -9,7 +9,15 @@ if (process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET) {
   providers.push(
     GoogleProvider({
       clientId: process.env.AUTH_GOOGLE_ID,
-      clientSecret: process.env.AUTH_GOOGLE_SECRET
+      clientSecret: process.env.AUTH_GOOGLE_SECRET,
+      profile(profile) {
+        return {
+          id: profile.sub,
+          name: profile.name,
+          email: profile.email,
+          image: profile.picture
+        };
+      }
     })
   );
 }
@@ -36,16 +44,31 @@ export const authOptions: NextAuthOptions = {
   providers,
   secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
   callbacks: {
-    async jwt({token, profile}) {
-      const googleProfile = profile as {picture?: string} | undefined;
-      if (googleProfile?.picture) {
-        token.picture = googleProfile.picture;
+    async jwt({token, profile, user, account}) {
+      const profilePicture = (profile as {picture?: string} | undefined)?.picture;
+      const userImage = (user as {image?: string | null} | undefined)?.image ?? undefined;
+      const tokenPicture = typeof token.picture === "string" ? token.picture : undefined;
+      const tokenImage = typeof token.image === "string" ? token.image : undefined;
+      const resolvedPicture = profilePicture ?? userImage ?? tokenPicture ?? tokenImage;
+
+      if (resolvedPicture) {
+        token.picture = resolvedPicture;
+        token.image = resolvedPicture;
+      }
+      if (account?.provider) {
+        token.provider = account.provider;
       }
       return token;
     },
     async session({session, token}) {
-      if (session.user && typeof token.picture === "string") {
-        session.user.image = token.picture;
+      if (session.user) {
+        const tokenPicture = typeof token.picture === "string" ? token.picture : undefined;
+        const tokenImage = typeof token.image === "string" ? token.image : undefined;
+        session.user.image = tokenPicture ?? tokenImage ?? session.user.image ?? null;
+        const tokenProvider = typeof token.provider === "string" ? token.provider : undefined;
+        if (tokenProvider) {
+          (session.user as {provider?: string}).provider = tokenProvider;
+        }
       }
       return session;
     }

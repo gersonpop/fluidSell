@@ -27,5 +27,88 @@
     "login-text-4": "Sync web, physical store, and marketplaces with instant product updates.",
     "login-title-5": "Enterprise security",
     "login-text-5": "Protect sensitive data with role-based access, audit logs, and continuous monitoring."
+  },
+  "AccountConfig": {
+    "layoutTitle": "Configuration",
+    "layoutDescription": "Manage application modules with real database persistence.",
+    "forbiddenOnlySu": "Only SU users can manage application modules.",
+    "loadingModules": "Loading modules...",
+    "title": "Module configuration",
+    "description": "Create and manage application modules from the database using the dynamic API.",
+    "menu": {
+      "application": "Application",
+      "moduleConfig": "Module configuration",
+      "generalConfig": "General configuration",
+      "labelPrint": "Label printing"
+    },
+    "controls": {
+      "searchPlaceholder": "Search by code, name, route or description",
+      "allStatuses": "All statuses",
+      "allScopes": "All scopes",
+      "addModule": "Add module"
+    },
+    "form": {
+      "edit": "Edit module",
+      "create": "Create module",
+      "code": "Code",
+      "immutableCode": "Immutable code",
+      "autoCode": "Auto-generated code",
+      "name": "Name",
+      "route": "Route /module",
+      "icon": "Icon (image)",
+      "pageContent": "Page content",
+      "order": "Order",
+      "status": "Status",
+      "scope": "Scope",
+      "parent": "Parent ID",
+      "root": "/ (root)",
+      "descriptionField": "Description",
+      "saving": "Saving...",
+      "saveChanges": "Save changes",
+      "createModule": "Create module",
+      "cancel": "Cancel"
+    },
+    "table": {
+      "results": "{count} results",
+      "pageOf": "Page {page} of {total}",
+      "code": "Code",
+      "name": "Name",
+      "route": "Route",
+      "status": "Status",
+      "updatedAt": "Updated",
+      "actions": "Actions",
+      "empty": "No modules match the current filters."
+    },
+    "actions": {
+      "edit": "Edit",
+      "deactivate": "Deactivate",
+      "reactivate": "Reactivate"
+    },
+    "pagination": {
+      "previous": "Previous",
+      "next": "Next"
+    },
+    "success": {
+      "created": "Module created successfully",
+      "updated": "Module updated successfully",
+      "deactivated": "Module deactivated",
+      "reactivated": "Module reactivated"
+    },
+    "errors": {
+      "load": "Load error",
+      "loadModules": "Could not load modules",
+      "loadScopes": "Could not load scopes",
+      "requiredName": "Name is required",
+      "requiredScope": "Scope is required",
+      "requiredStatus": "Status is required",
+      "requiredPageContent": "Page content is required",
+      "numericOrder": "Order must be numeric",
+      "save": "Could not save",
+      "status": "Could not change status"
+    },
+    "confirm": {
+      "deactivate": "{name} will be deactivated. Continue?",
+      "reactivate": "{name} will be reactivated. Continue?"
+    }
   }
 }

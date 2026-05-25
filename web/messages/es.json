@@ -27,5 +27,88 @@
     "login-text-4": "Sincroniza web, tienda fisica y marketplaces con actualizaciones instantaneas.",
     "login-title-5": "Seguridad empresarial",
     "login-text-5": "Protege datos sensibles con acceso por roles, registros y monitoreo continuo."
+  },
+  "AccountConfig": {
+    "layoutTitle": "Configuracion",
+    "layoutDescription": "Administra modulos de la aplicacion con persistencia real en base de datos.",
+    "forbiddenOnlySu": "Solo usuarios SU pueden administrar modulos de la aplicacion.",
+    "loadingModules": "Cargando modulos...",
+    "title": "Configuracion de modulos",
+    "description": "Crea y administra los modulos de la aplicacion desde BD usando API dinamica.",
+    "menu": {
+      "application": "Aplicacion",
+      "moduleConfig": "Configuracion de modulos",
+      "generalConfig": "Configuracion general",
+      "labelPrint": "Impresion de etiquetas"
+    },
+    "controls": {
+      "searchPlaceholder": "Buscar por code, nombre, ruta o descripcion",
+      "allStatuses": "Todos los estados",
+      "allScopes": "Todos los scopes",
+      "addModule": "Agregar modulo"
+    },
+    "form": {
+      "edit": "Editar modulo",
+      "create": "Crear modulo",
+      "code": "Codigo",
+      "immutableCode": "Codigo inmutable",
+      "autoCode": "Codigo autogenerado",
+      "name": "Nombre",
+      "route": "Ruta /modulo",
+      "icon": "Icono (imagen)",
+      "pageContent": "Contenido de pagina",
+      "order": "Orden",
+      "status": "Status",
+      "scope": "Scope",
+      "parent": "Parent ID",
+      "root": "/ (raiz)",
+      "descriptionField": "Descripcion",
+      "saving": "Guardando...",
+      "saveChanges": "Guardar cambios",
+      "createModule": "Crear modulo",
+      "cancel": "Cancelar"
+    },
+    "table": {
+      "results": "{count} resultados",
+      "pageOf": "Pagina {page} de {total}",
+      "code": "Code",
+      "name": "Nombre",
+      "route": "Ruta",
+      "status": "Status",
+      "updatedAt": "Actualizado",
+      "actions": "Acciones",
+      "empty": "No hay modulos para los filtros actuales."
+    },
+    "actions": {
+      "edit": "Editar",
+      "deactivate": "Desactivar",
+      "reactivate": "Reactivar"
+    },
+    "pagination": {
+      "previous": "Anterior",
+      "next": "Siguiente"
+    },
+    "success": {
+      "created": "Modulo creado correctamente",
+      "updated": "Modulo actualizado correctamente",
+      "deactivated": "Modulo desactivado",
+      "reactivated": "Modulo reactivado"
+    },
+    "errors": {
+      "load": "Error de carga",
+      "loadModules": "No se pudieron cargar modulos",
+      "loadScopes": "No se pudieron cargar scopes",
+      "requiredName": "Nombre requerido",
+      "requiredScope": "Scope requerido",
+      "requiredStatus": "Status requerido",
+      "requiredPageContent": "Contenido de pagina requerido",
+      "numericOrder": "Orden debe ser numerico",
+      "save": "No se pudo guardar",
+      "status": "No se pudo cambiar el estado"
+    },
+    "confirm": {
+      "deactivate": "Se desactivara {name}. Quieres continuar?",
+      "reactivate": "Se reactivara {name}. Quieres continuar?"
+    }
   }
 }

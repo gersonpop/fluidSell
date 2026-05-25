@@ -6,6 +6,9 @@ Construir una plataforma SaaS multitenant que permita a empresas cliente gestion
 
 La plataforma debe permitir que el dueño del SaaS administre empresas, planes, pagos, permisos, consumo e insights globales, y que cada empresa cliente administre su propia operación comercial y de community management.
 
+Documentacion complementaria de API:
+- `API_V1_DB_MANUAL.md`: manual operativo de endpoints dinamicos `api/v1/db`, seguridad y ejemplos.
+
 ---
 
 ## 2. Modelo de negocio

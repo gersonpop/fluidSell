@@ -27,5 +27,88 @@
     "login-text-4": "Synchronisez site web, magasin physique et marketplaces avec des mises a jour instantanees.",
     "login-title-5": "Securite entreprise",
     "login-text-5": "Protegez les donnees sensibles avec acces par roles, journaux d'audit et supervision continue."
+  },
+  "AccountConfig": {
+    "layoutTitle": "Configuration",
+    "layoutDescription": "Administrez les modules de l'application avec une persistance reelle en base de donnees.",
+    "forbiddenOnlySu": "Seuls les utilisateurs SU peuvent administrer les modules de l'application.",
+    "loadingModules": "Chargement des modules...",
+    "title": "Configuration des modules",
+    "description": "Creez et administrez les modules depuis la base via l'API dynamique.",
+    "menu": {
+      "application": "Application",
+      "moduleConfig": "Configuration des modules",
+      "generalConfig": "Configuration generale",
+      "labelPrint": "Impression d'etiquettes"
+    },
+    "controls": {
+      "searchPlaceholder": "Rechercher par code, nom, route ou description",
+      "allStatuses": "Tous les statuts",
+      "allScopes": "Tous les scopes",
+      "addModule": "Ajouter un module"
+    },
+    "form": {
+      "edit": "Modifier le module",
+      "create": "Creer un module",
+      "code": "Code",
+      "immutableCode": "Code immuable",
+      "autoCode": "Code auto-genere",
+      "name": "Nom",
+      "route": "Route /module",
+      "icon": "Icone (image)",
+      "pageContent": "Contenu de page",
+      "order": "Ordre",
+      "status": "Statut",
+      "scope": "Scope",
+      "parent": "ID parent",
+      "root": "/ (racine)",
+      "descriptionField": "Description",
+      "saving": "Enregistrement...",
+      "saveChanges": "Enregistrer les modifications",
+      "createModule": "Creer le module",
+      "cancel": "Annuler"
+    },
+    "table": {
+      "results": "{count} resultats",
+      "pageOf": "Page {page} sur {total}",
+      "code": "Code",
+      "name": "Nom",
+      "route": "Route",
+      "status": "Statut",
+      "updatedAt": "Mis a jour",
+      "actions": "Actions",
+      "empty": "Aucun module pour les filtres actuels."
+    },
+    "actions": {
+      "edit": "Modifier",
+      "deactivate": "Desactiver",
+      "reactivate": "Reactiver"
+    },
+    "pagination": {
+      "previous": "Precedent",
+      "next": "Suivant"
+    },
+    "success": {
+      "created": "Module cree avec succes",
+      "updated": "Module mis a jour avec succes",
+      "deactivated": "Module desactive",
+      "reactivated": "Module reactive"
+    },
+    "errors": {
+      "load": "Erreur de chargement",
+      "loadModules": "Impossible de charger les modules",
+      "loadScopes": "Impossible de charger les scopes",
+      "requiredName": "Le nom est requis",
+      "requiredScope": "Le scope est requis",
+      "requiredStatus": "Le statut est requis",
+      "requiredPageContent": "Le contenu de page est requis",
+      "numericOrder": "L'ordre doit etre numerique",
+      "save": "Impossible d'enregistrer",
+      "status": "Impossible de changer le statut"
+    },
+    "confirm": {
+      "deactivate": "{name} sera desactive. Continuer ?",
+      "reactivate": "{name} sera reactive. Continuer ?"
+    }
   }
 }

@@ -24,8 +24,8 @@ enum UserStatus {
 }
 
 enum RoleScope {
-  PLATFORM
-  COMPANY
+  SU
+  CLIENT 
 }
 
 enum CampaignStatus {
@@ -74,17 +74,42 @@ enum SubscriptionStatus {
 }
 
 model PlatformUser {
-  id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  password  String
-  isSuper   Boolean  @default(false)
+  idUserPk        String   @id @unique @default(cuid()) @map("id_user_pk")
+  idEmployeeFk    Int      @default(autoincrement()) @map("id_employee_fk")
+  userEmail       String   @unique @map("user_email")
+  phoneNumber     String?  @map("phone_number")
+  position        String?
+  password        String?
+  username        String   @unique
+  name            String?
+  lastName        String?  @map("last_name")
+  companyId       String?
+  company         Company? @relation("CompanyMembers", fields: [companyId], references: [id])
+  idJefeInmFk     String?  @map("id_jefe_inm_fk")
+  avatar          String?
+  departmentCode  String?  @map("department_code")
+  cityCode        String?  @map("city_code")
+  userPermission  String?  @map("user_permission")
+  sign            String?
+  theme           String?
+  status          String?
+  gender          String?
+  countryCode     String?  @map("country_code")
+  countryIso      String?  @map("country_iso")
+  dni             String?
+  birthDate       DateTime? @map("birth_date")
+  provider        String?
+  providerUserId  String?  @map("provider_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
-  managedCompanies Company[]
+  managedCompanies Company[] @relation("CompanyCreatedBy")
   auditLogs        AuditLog[]
+  roles            UserRole[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  @@unique([companyId, idEmployeeFk])
+  @@unique([dni, countryCode])
+  @@map("PlatformUser")
 }
 
 model Company {
@@ -104,16 +129,18 @@ model Company {
   status         CompanyStatus @default(TRIAL)
 
   createdById    String?
-  createdBy      PlatformUser? @relation(fields: [createdById], references: [id])
+  createdBy      PlatformUser? @relation("CompanyCreatedBy", fields: [createdById], references: [idUserPk])
 
   brandProfile   BrandProfile?
 
-  users           CompanyUser[]
+  users           PlatformUser[] @relation("CompanyMembers")
   roles           Role[]
   products        Product[]
   customers       Customer[]
+  sales           Sale[]
   campaigns       Campaign[]
   contentAssets   ContentAsset[]
+  leads           Lead[]
   segments        Segment[]
   automationRules AutomationRule[]
   subscriptions   Subscription[]
@@ -127,8 +154,8 @@ model Company {
 
 model BrandProfile {
   id                       String   @id @default(cuid())
-  empresaId                 String   @unique
-  company                  Company  @relation(fields: [empresaId], references: [id])
+  companyId                 String   @unique
+  company                  Company  @relation(fields: [companyId], references: [id])
 
   logoUrl                  String?
   secondaryLogoUrl          String?
@@ -148,30 +175,10 @@ model BrandProfile {
   updatedAt                DateTime @updatedAt
 }
 
-model CompanyUser {
-  id        String     @id @default(cuid())
-  empresaId String
-  company   Company    @relation(fields: [empresaId], references: [id])
-
-  name      String
-  email     String
-  password  String?
-  phone     String?
-  status    UserStatus @default(INVITED)
-
-  roles     UserRole[]
-
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-
-  @@unique([empresaId, email])
-  @@index([empresaId])
-}
-
 model Role {
   id                       String     @id @default(cuid())
-  empresaId                 String?
-  company                  Company?   @relation(fields: [empresaId], references: [id])
+  companyId                 String?
+  company                  Company?   @relation(fields: [companyId], references: [id])
 
   name                     String
   key                      String?
@@ -186,21 +193,22 @@ model Role {
   createdAt                DateTime   @default(now())
   updatedAt                DateTime   @updatedAt
 
-  @@index([empresaId])
-  @@unique([empresaId, key])
+  @@index([companyId])
+  @@unique([companyId, key])
 }
 
 model UserRole {
-  id            String      @id @default(cuid())
-  companyUserId String
-  roleId        String
+  id             String       @id @default(cuid())
+  platformUserId String       @map("platform_user_id")
+  roleId         String
 
-  user          CompanyUser @relation(fields: [companyUserId], references: [id])
-  role          Role        @relation(fields: [roleId], references: [id])
+  user           PlatformUser @relation(fields: [platformUserId], references: [idUserPk])
+  role           Role         @relation(fields: [roleId], references: [id])
 
-  createdAt     DateTime    @default(now())
+  createdAt      DateTime     @default(now())
 
-  @@unique([companyUserId, roleId])
+  @@unique([platformUserId, roleId])
+  @@index([roleId])
 }
 
 model Module {
@@ -210,14 +218,13 @@ model Module {
   scope       RoleScope
   route       String?
   icon        String?
+  content     String?
+  pageContent String?  @map("page_content")
   category    String?
-  parentId    String?
+  parentId    String   @default("/")
   isMenu      Boolean  @default(true)
   isActive    Boolean  @default(true)
   description String?
-
-  parent      Module?  @relation("ModuleTree", fields: [parentId], references: [id])
-  children    Module[] @relation("ModuleTree")
 
   permissions RolePermission[]
 
@@ -240,12 +247,13 @@ model RolePermission {
   module    Module @relation(fields: [moduleId], references: [id])
 
   @@unique([roleId, moduleId])
+  @@index([moduleId])
 }
 
 model Product {
   id                       String   @id @default(cuid())
-  empresaId                 String
-  company                  Company  @relation(fields: [empresaId], references: [id])
+  companyId                 String
+  company                  Company  @relation(fields: [companyId], references: [id])
 
   name                     String
   category                 String?
@@ -266,13 +274,13 @@ model Product {
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
 
-  @@index([empresaId])
+  @@index([companyId])
 }
 
 model Customer {
   id        String       @id @default(cuid())
-  empresaId String
-  company   Company      @relation(fields: [empresaId], references: [id])
+  companyId String
+  company   Company      @relation(fields: [companyId], references: [id])
 
   name      String?
   phone     String?
@@ -291,15 +299,15 @@ model Customer {
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
-  @@index([empresaId])
+  @@index([companyId])
   @@index([phone])
   @@index([whatsapp])
 }
 
 model Segment {
   id          String   @id @default(cuid())
-  empresaId   String
-  company     Company  @relation(fields: [empresaId], references: [id])
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
 
   name        String
   description String?
@@ -312,7 +320,7 @@ model Segment {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  @@index([empresaId])
+  @@index([companyId])
 }
 
 model CustomerSegment {
@@ -330,8 +338,8 @@ model CustomerSegment {
 
 model Campaign {
   id               String         @id @default(cuid())
-  empresaId         String
-  company          Company        @relation(fields: [empresaId], references: [id])
+  companyId         String
+  company          Company        @relation(fields: [companyId], references: [id])
 
   segmentId        String?
   segment          Segment?       @relation(fields: [segmentId], references: [id])
@@ -356,7 +364,7 @@ model Campaign {
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
-  @@index([empresaId])
+  @@index([companyId])
   @@index([status])
 }
 
@@ -373,8 +381,8 @@ model CampaignProduct {
 
 model ContentAsset {
   id         String      @id @default(cuid())
-  empresaId  String
-  company    Company     @relation(fields: [empresaId], references: [id])
+  companyId  String
+  company    Company     @relation(fields: [companyId], references: [id])
 
   campaignId String?
   campaign   Campaign?   @relation(fields: [campaignId], references: [id])
@@ -390,13 +398,13 @@ model ContentAsset {
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
 
-  @@index([empresaId])
+  @@index([companyId])
 }
 
 model Lead {
   id         String     @id @default(cuid())
-  empresaId  String
-  company    Company    @relation(fields: [empresaId], references: [id])
+  companyId  String
+  company    Company    @relation(fields: [companyId], references: [id])
 
   customerId String?
   customer   Customer?  @relation(fields: [customerId], references: [id])
@@ -412,14 +420,15 @@ model Lead {
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 
-  @@index([empresaId])
+  @@index([companyId])
 }
 
 model Sale {
   id          String    @id @default(cuid())
-  empresaId   String
+  companyId   String
   customerId  String
 
+  company     Company   @relation(fields: [companyId], references: [id])
   customer    Customer  @relation(fields: [customerId], references: [id])
   items       SaleItem[]
 
@@ -429,7 +438,7 @@ model Sale {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  @@index([empresaId])
+  @@index([companyId])
 }
 
 model SaleItem {
@@ -442,12 +451,14 @@ model SaleItem {
 
   quantity  Int      @default(1)
   unitPrice Decimal?
+
+  @@index([productId])
 }
 
 model AutomationRule {
   id          String   @id @default(cuid())
-  empresaId   String
-  company     Company  @relation(fields: [empresaId], references: [id])
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
 
   name        String
   description String?
@@ -459,13 +470,13 @@ model AutomationRule {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  @@index([empresaId])
+  @@index([companyId])
 }
 
 model Integration {
   id           String   @id @default(cuid())
-  empresaId    String
-  company      Company  @relation(fields: [empresaId], references: [id])
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id])
 
   provider     String
   accountId    String?
@@ -477,7 +488,7 @@ model Integration {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  @@index([empresaId])
+  @@index([companyId])
 }
 
 model Plan {
@@ -498,8 +509,8 @@ model Plan {
 
 model Subscription {
   id          String             @id @default(cuid())
-  empresaId   String
-  company     Company            @relation(fields: [empresaId], references: [id])
+  companyId   String
+  company     Company            @relation(fields: [companyId], references: [id])
 
   planId      String?
   plan        Plan?              @relation(fields: [planId], references: [id])
@@ -518,7 +529,7 @@ model Subscription {
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
 
-  @@index([empresaId])
+  @@index([companyId])
 }
 
 model Payment {
@@ -538,8 +549,8 @@ model Payment {
 
 model Competitor {
   id           String   @id @default(cuid())
-  empresaId    String
-  company      Company  @relation(fields: [empresaId], references: [id])
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id])
 
   name         String
   website      String?
@@ -550,15 +561,15 @@ model Competitor {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  @@index([empresaId])
+  @@index([companyId])
 }
 
 model AuditLog {
   id             String        @id @default(cuid())
-  empresaId       String?
-  company        Company?      @relation(fields: [empresaId], references: [id])
+  companyId       String?
+  company        Company?      @relation(fields: [companyId], references: [id])
   platformUserId String?
-  platformUser   PlatformUser? @relation(fields: [platformUserId], references: [id])
+  platformUser   PlatformUser? @relation(fields: [platformUserId], references: [idUserPk])
 
   actorType      String
   actorId        String?
@@ -569,6 +580,54 @@ model AuditLog {
 
   createdAt      DateTime      @default(now())
 
-  @@index([empresaId])
+  @@index([companyId])
   @@index([action])
+}
+
+model StMultidata {
+  initialsPk      String   @map("Initials_PK")
+  name            String
+  value           String
+  type            String
+  typeDescription String?  @map("typeDescription")
+  typeUse         String?  @map("typeUse")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@id([value, type])
+  @@map("st_Multidata")
+}
+
+model StCountry {
+  prefixArea Int      @map("prefix_area")
+  iso        String   @id
+  nombre     String
+  states     StState[]
+  cities     StCity[]
+
+  @@map("st_Country")
+}
+
+model StState {
+  idState    Int       @id @map("id_state")
+  state      String
+  isoCountry String    @map("iso_country")
+  country    StCountry @relation(fields: [isoCountry], references: [iso])
+  cities     StCity[]
+
+  @@index([isoCountry])
+  @@map("st_State")
+}
+
+model StCity {
+  idCity     Int       @id @map("id_city")
+  city       String
+  isoCountry String    @map("iso_country")
+  stateId    Int       @map("state_id")
+  country    StCountry @relation(fields: [isoCountry], references: [iso])
+  state      StState   @relation(fields: [stateId], references: [idState])
+
+  @@index([isoCountry])
+  @@index([stateId])
+  @@map("st_City")
 }

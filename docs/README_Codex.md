@@ -6,6 +6,7 @@
 - `AGENTS.md`: instrucciones permanentes para Codex.
 - `TASKS.md`: plan de implementación por fases.
 - `DECISIONS.md`: decisiones arquitectónicas.
+- `API_V1_DB_MANUAL.md`: manual de endpoints dinamicos `api/v1/db`.
 - `permissions.schema.json`: estructura del JSON cifrado de permisos.
 - `MODULES_SEED.md`: catálogo inicial de módulos para sidebar/RBAC.
 - `prisma/schema.prisma`: schema Prisma inicial recomendado.
@@ -21,6 +22,7 @@
    - `AGENTS.md`
    - `TASKS.md`
    - `DECISIONS.md`
+   - `API_V1_DB_MANUAL.md`
    - `permissions.schema.json`
    - `MODULES_SEED.md`
 

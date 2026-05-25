@@ -6,6 +6,34 @@
       "description": "Gestion interna del desarrollo",
       "priority": "P0",
       "status": "Ready"
+    },
+    {
+      "id": "EPIC-030",
+      "title": "Sidebar por Roles y Configuracion de Cuentas",
+      "description": "Implementar visibilidad de modulos por rol/microrol y control de acceso para configuracion cliente",
+      "priority": "P0",
+      "status": "Ready"
+    },
+    {
+      "id": "EPIC-040",
+      "title": "API Dinamica Multi-tenant",
+      "description": "Rutas dinamicas CRUD con Prisma, seguridad OAuth/token y segmentacion por companyId",
+      "priority": "P0",
+      "status": "Ready"
+    },
+    {
+      "id": "EPIC-050",
+      "title": "Onboarding Social y Alta Administrativa",
+      "description": "Registro/actualizacion por login social con catalogos, validaciones de identidad y bloqueo hasta aprobacion",
+      "priority": "P0",
+      "status": "Done"
+    },
+    {
+      "id": "EPIC-060",
+      "title": "Configuracion de Modulos en Settings",
+      "description": "Gestionar modulos de aplicacion en BD con API dinamica y acceso SU",
+      "priority": "P0",
+      "status": "Done"
     }
   ],
   "stories": [
@@ -17,7 +45,7 @@
       "app": "WEB",
       "module": "scrum",
       "priority": "P0",
-      "status": "Backlog",
+      "status": "Done",
       "points": 5,
       "decisionRecordIds": [
         "DR-006"
@@ -31,7 +59,343 @@
         "Persistencia de cambios"
       ],
       "notes": "",
-      "updatedAt": "2026-05-20T13:46:19.406Z"
+      "updatedAt": "2026-05-20T17:48:14.750Z"
+    },
+    {
+      "id": "STORY-SIDEBAR-001",
+      "epicId": "EPIC-030",
+      "title": "Visibilidad de modulos en sidebar por rol y microrol",
+      "userStory": "Como SU quiero controlar que modulos se muestran segun permisos para reducir accesos no autorizados.",
+      "app": "WEB",
+      "module": "sidebar",
+      "priority": "P0",
+      "status": "Done",
+      "points": 8,
+      "decisionRecordIds": [],
+      "acceptanceCriteria": [
+        "Cada modulo del sidebar tiene regla de visibilidad por rol/microrol",
+        "Usuario sin permiso no visualiza modulo",
+        "Soporta usuario sin rol con sidebar minimo"
+      ],
+      "requiredTests": [
+        "Render de menu por permisos",
+        "Fallback para usuario sin rol",
+        "Consistencia entre sesiones"
+      ],
+      "notes": "Fuente: specs/sidebar/spec-sidebar-roles-configuracion.md",
+      "updatedAt": "2026-05-20T19:20:00.000Z"
+    },
+    {
+      "id": "STORY-SIDEBAR-002",
+      "epicId": "EPIC-030",
+      "title": "Bloqueo de acceso directo por URL en modulos no autorizados",
+      "userStory": "Como Security Lead quiero impedir bypass por URL para garantizar enforcement de autorizacion.",
+      "app": "WEB",
+      "module": "sidebar",
+      "priority": "P0",
+      "status": "Done",
+      "points": 5,
+      "decisionRecordIds": [],
+      "acceptanceCriteria": [
+        "Ruta protegida valida permisos antes de render",
+        "Usuario no autorizado recibe acceso denegado",
+        "Evento queda trazado en auditoria"
+      ],
+      "requiredTests": [
+        "Acceso URL permitido",
+        "Acceso URL denegado",
+        "Registro de intento denegado"
+      ],
+      "notes": "Fuente: specs/sidebar/spec-sidebar-roles-configuracion.md",
+      "updatedAt": "2026-05-20T19:21:19.678Z"
+    },
+    {
+      "id": "STORY-SIDEBAR-003",
+      "epicId": "EPIC-030",
+      "title": "Modulo de configuracion de cuentas cliente segmentado por companyId",
+      "userStory": "Como Administrador Cliente necesito gestionar cuentas y roles de mi companyId sin ver otras empresas.",
+      "app": "WEB",
+      "module": "sidebar",
+      "priority": "P1",
+      "status": "Done",
+      "points": 8,
+      "decisionRecordIds": [],
+      "acceptanceCriteria": [
+        "Administrador cliente solo gestiona su companyId",
+        "SU puede gestionar cualquier companyId",
+        "Asignacion y retiro de roles por cuenta"
+      ],
+      "requiredTests": [
+        "Filtro por companyId",
+        "Permisos SU vs cliente",
+        "Operacion de asignacion/retiro de roles"
+      ],
+      "notes": "Fuente: specs/sidebar/spec-sidebar-roles-configuracion.md",
+      "updatedAt": "2026-05-20T19:45:00.000Z"
+    },
+    {
+      "id": "STORY-API-001",
+      "epicId": "EPIC-040",
+      "title": "CRUD dinamico con endpoint unico por tabla",
+      "userStory": "Como usuario backend quiero operar CRUD sobre /api/v1/bd/[table] para acelerar integraciones de datos.",
+      "app": "API-CORE",
+      "module": "api",
+      "priority": "P0",
+      "status": "Done",
+      "points": 8,
+      "decisionRecordIds": [],
+      "acceptanceCriteria": [
+        "Existe endpoint dinamico /api/v1/bd/[table]",
+        "Soporta operaciones CRUD basicas",
+        "Valida tabla existente en esquema"
+      ],
+      "requiredTests": [
+        "CRUD sobre tabla valida",
+        "Error sobre tabla inexistente",
+        "Validacion de metodos"
+      ],
+      "notes": "Fuente: specs/api/basics/spec-api-dinamica-multitenant.md",
+      "updatedAt": "2026-05-22T18:17:12.863Z"
+    },
+    {
+      "id": "STORY-API-002",
+      "epicId": "EPIC-040",
+      "title": "Seguridad token + sesion OAuth + CORS",
+      "userStory": "Como experto backend necesito proteger rutas con token en header, sesion OAuth activa y politicas CORS.",
+      "app": "API-CORE",
+      "module": "api",
+      "priority": "P0",
+      "status": "Backlog",
+      "points": 8,
+      "decisionRecordIds": [],
+      "acceptanceCriteria": [
+        "Rutas rechazan token ausente o invalido",
+        "Sesion OAuth debe estar activa",
+        "CORS bloquea origenes no permitidos"
+      ],
+      "requiredTests": [
+        "401 token ausente/invalido",
+        "Denegacion por sesion expirada",
+        "Bloqueo por CORS"
+      ],
+      "notes": "Fuente: specs/api/basics/spec-api-dinamica-multitenant.md",
+      "updatedAt": "2026-05-20T20:05:00.000Z"
+    },
+    {
+      "id": "STORY-API-003",
+      "epicId": "EPIC-040",
+      "title": "Scope SU y filtro forzado por companyId en mismo endpoint",
+      "userStory": "Como usuario quiero que el mismo endpoint cambie alcance por scope: SU global, cliente filtrado por companyId.",
+      "app": "API-CORE",
+      "module": "api",
+      "priority": "P0",
+      "status": "Backlog",
+      "points": 13,
+      "decisionRecordIds": [],
+      "acceptanceCriteria": [
+        "Scope SU accede sin filtro companyId",
+        "Scope cliente aplica filtro forzado por companyId",
+        "No permite acceso cross-company"
+      ],
+      "requiredTests": [
+        "Lectura global para SU",
+        "Filtrado estricto para cliente",
+        "Intento cross-company denegado"
+      ],
+      "notes": "Fuente: specs/api/basics/spec-api-dinamica-multitenant.md",
+      "updatedAt": "2026-05-20T20:05:00.000Z"
+    },
+    {
+      "id": "STORY-LOGIN-001",
+      "epicId": "EPIC-050",
+      "title": "Resolver login social y enrutar flujo por estado",
+      "userStory": "Como usuario que ingresa por red social quiero que el sistema me lleve a formulario, revision o acceso segun mi estado y vinculos.",
+      "app": "WEB",
+      "module": "login",
+      "priority": "P0",
+      "status": "Done",
+      "points": 8,
+      "decisionRecordIds": [],
+      "acceptanceCriteria": [
+        "Resolve retorna ACTIVE, FORM_REQUIRED, PENDING_ONLY o PROVIDER_CONFLICT",
+        "Usuario activo ingresa normalmente",
+        "Usuario nuevo/inactivo es enviado al formulario"
+      ],
+      "requiredTests": [
+        "Resolucion correcta por estado de usuario",
+        "Bloqueo por conflicto de proveedor social",
+        "Sesion pendiente no navega a modulos internos"
+      ],
+      "notes": "Fuente: specs/login/onboarding-social-con-catalogos.md",
+      "updatedAt": "2026-05-21T15:05:00.000Z"
+    },
+    {
+      "id": "STORY-LOGIN-002",
+      "epicId": "EPIC-050",
+      "title": "Formulario onboarding con catalogos maestros",
+      "userStory": "Como usuario nuevo o inactivo quiero completar/actualizar mis datos usando listas controladas por catalogo.",
+      "app": "WEB",
+      "module": "login",
+      "priority": "P0",
+      "status": "Done",
+      "points": 13,
+      "decisionRecordIds": [],
+      "acceptanceCriteria": [
+        "Formulario exige campos obligatorios definidos",
+        "Empresa, genero, codigoPais, pais, departamento y ciudad salen de catalogo",
+        "Selects dependientes pais->departamento->ciudad"
+      ],
+      "requiredTests": [
+        "Validaciones de UI y server-side",
+        "Bloqueo de submit con catalogo vacio o invalido",
+        "Manejo de errores de carga de catalogos"
+      ],
+      "notes": "Fuente: specs/login/onboarding-social-con-catalogos.md",
+      "updatedAt": "2026-05-21T15:05:00.000Z"
+    },
+    {
+      "id": "STORY-LOGIN-003",
+      "epicId": "EPIC-050",
+      "title": "Persistencia, unicidad pais+dni y estado pendiente",
+      "userStory": "Como seguridad de plataforma quiero evitar duplicados de identidad y dejar usuarios en pendiente hasta alta admin.",
+      "app": "API-CORE",
+      "module": "login",
+      "priority": "P0",
+      "status": "Done",
+      "points": 13,
+      "decisionRecordIds": [],
+      "acceptanceCriteria": [
+        "Validacion de unicidad por countryCode+dni",
+        "Submit crea/actualiza y deja estado PENDING_APPROVAL",
+        "Se auditan transiciones y acciones clave"
+      ],
+      "requiredTests": [
+        "Rechazo de duplicado pais+dni",
+        "Persistencia de nuevo e inactivo",
+        "Auditoria de transiciones"
+      ],
+      "notes": "Fuente: specs/login/onboarding-social-con-catalogos.md",
+      "updatedAt": "2026-05-21T20:26:00.000Z"
+    },
+    {
+      "id": "STORY-LOGIN-004",
+      "epicId": "EPIC-050",
+      "title": "Flujo administrativo de aprobacion y testing E2E",
+      "userStory": "Como administrador quiero aprobar/rechazar pendientes y habilitar acceso solo cuando corresponda.",
+      "app": "WEB",
+      "module": "login",
+      "priority": "P1",
+      "status": "Done",
+      "points": 8,
+      "decisionRecordIds": [],
+      "acceptanceCriteria": [
+        "Existe bandeja de pendientes con aprobar/rechazar",
+        "Solo rol autorizado puede aprobar",
+        "Usuario aprobado pasa a ACTIVE y puede ingresar"
+      ],
+      "requiredTests": [
+        "Permisos de aprobacion/rechazo",
+        "Flujo E2E onboarding->pendiente->aprobado",
+        "Bloqueo de acceso mientras este pendiente"
+      ],
+      "notes": "Fuente: specs/login/onboarding-social-con-catalogos.md",
+      "updatedAt": "2026-05-21T20:26:00.000Z"
+    },
+    {
+      "id": "STORY-MODULES-001",
+      "epicId": "EPIC-060",
+      "title": "Definir especificacion y backlog ejecutable de modulos",
+      "userStory": "Como SU necesito una especificacion ejecutable para administrar modulos desde Settings con API dinamica y BD real.",
+      "app": "WEB",
+      "module": "settings",
+      "priority": "P0",
+      "status": "Done",
+      "points": 3,
+      "decisionRecordIds": [],
+      "acceptanceCriteria": [
+        "Existe especificacion en specs/modules",
+        "No se plantean rutas especificas para modulos",
+        "Se define integracion con st_multidata roleScope"
+      ],
+      "requiredTests": [
+        "Revision documental por equipo",
+        "Trazabilidad de tareas en tablero"
+      ],
+      "notes": "Fuente: specs/modules/spec-modules-configuracion.md",
+      "updatedAt": "2026-05-22T22:00:00.000Z"
+    },
+    {
+      "id": "STORY-MODULES-002",
+      "epicId": "EPIC-060",
+      "title": "Implementar persistencia de modules en PostgreSQL",
+      "userStory": "Como backend necesito persistir modules en BD y eliminar uso de archivos locales para este flujo.",
+      "app": "API-CORE",
+      "module": "modules",
+      "priority": "P0",
+      "status": "Done",
+      "points": 13,
+      "decisionRecordIds": [],
+      "acceptanceCriteria": [
+        "Tabla modules creada con indices code,status,sort_order",
+        "DELETE logico por status inactive",
+        "scope_id validado contra st_multidata roleScope"
+      ],
+      "requiredTests": [
+        "Integracion API con BD",
+        "Autorizacion SU en mutaciones",
+        "Pruebas de no uso de archivos locales"
+      ],
+      "notes": "Ruta dinamica objetivo: /api/v1/db/modules",
+      "updatedAt": "2026-05-22T23:10:00.000Z"
+    },
+    {
+      "id": "STORY-MODULES-003",
+      "epicId": "EPIC-060",
+      "title": "Construir ventana Settings para configuracion de modulos",
+      "userStory": "Como SU quiero crear, editar y administrar modulos desde una vista de Settings alineada al diseno de referencia.",
+      "app": "WEB",
+      "module": "settings",
+      "priority": "P0",
+      "status": "Done",
+      "points": 13,
+      "decisionRecordIds": [],
+      "acceptanceCriteria": [
+        "Listado, filtros y formulario funcional",
+        "Acciones desactivar/reactivar disponibles",
+        "Sidebar refleja status y scope"
+      ],
+      "requiredTests": [
+        "E2E de flujo de configuracion",
+        "Estados loading/empty/error/forbidden"
+      ],
+      "notes": "UI basada en referencia de Configuracion general",
+      "updatedAt": "2026-05-22T23:40:00.000Z"
+    },
+    {
+      "id": "STORY-MODULES-004",
+      "epicId": "EPIC-060",
+      "title": "Comportamiento de modulos por contenido y jerarquia",
+      "userStory": "Como desarrollador necesito que los modulos soporten embedded/newPage, orden por parent y raiz en sidebar con i18n.",
+      "app": "WEB",
+      "module": "modules",
+      "priority": "P0",
+      "status": "Done",
+      "points": 13,
+      "decisionRecordIds": [],
+      "acceptanceCriteria": [
+        "Sidebar presente en rutas protegidas",
+        "Embedded renderiza panel izquierdo/derecho con hijos",
+        "NewPage permite navegacion desde parent",
+        "Orden aplica por contexto de parent",
+        "Raiz en sidebar con icono e internacionalizacion"
+      ],
+      "requiredTests": [
+        "Build verificado",
+        "Validaciones backend de parent/content",
+        "Prueba funcional de formulario e i18n"
+      ],
+      "notes": "Fuente: specs/modules/spec-modules-configuracion.md",
+      "updatedAt": "2026-05-26T00:10:00.000Z"
     }
   ],
   "tasks": [
@@ -39,21 +403,701 @@
       "id": "TASK-SCRUM-001",
       "storyId": "STORY-SCRUM-001",
       "title": "Crear estructura inicial de scrum-db",
-      "ownerRole": "Backend Engineer",
-      "status": "ToDo",
+      "ownerRole": "backend-auth-integrator",
+      "status": "Done",
       "tests": [
         {
           "id": "T1",
           "label": "Archivo existe",
-          "done": false
+          "done": true
         },
         {
           "id": "T2",
           "label": "JSON valido",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-20T17:48:14.556Z"
+    },
+    {
+      "id": "TASK-SIDEBAR-001",
+      "storyId": "STORY-SIDEBAR-001",
+      "title": "Modelar matriz de visibilidad modulo->rol/microrol para sidebar",
+      "ownerRole": "access-policy-guardian",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Cada modulo tiene regla de visibilidad definida",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Reglas soportan rol y microrol",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-20T19:38:00.000Z"
+    },
+    {
+      "id": "TASK-SIDEBAR-002",
+      "storyId": "STORY-SIDEBAR-001",
+      "title": "Implementar rendering dinamico de sidebar segun permisos efectivos",
+      "ownerRole": "frontend-navigation-specialist",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Modulos sin permiso no se renderizan",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Usuario sin rol ve sidebar minimo controlado",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-20T19:38:00.000Z"
+    },
+    {
+      "id": "TASK-SIDEBAR-003",
+      "storyId": "STORY-SIDEBAR-002",
+      "title": "Aplicar guardas de autorizacion para acceso directo por URL",
+      "ownerRole": "backend-auth-integrator",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Acceso permitido cuando existe permiso",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Acceso denegado con respuesta controlada sin permiso",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-20T19:38:00.000Z"
+    },
+    {
+      "id": "TASK-SIDEBAR-004",
+      "storyId": "STORY-SIDEBAR-002",
+      "title": "Registrar auditoria de intentos denegados por URL",
+      "ownerRole": "cybersecurity-guardian",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Evento incluye usuario, ruta y timestamp",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Se persiste evidencia de denegacion",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-20T19:21:19.664Z"
+    },
+    {
+      "id": "TASK-SIDEBAR-005",
+      "storyId": "STORY-SIDEBAR-003",
+      "title": "Construir UI de configuracion de cuentas cliente y asignacion de roles",
+      "ownerRole": "ui-system-architect",
+      "status": "ToDo",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Permite asignar y retirar roles por cuenta",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Muestra estado de cuenta y feedback de acciones",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-20T19:45:00.000Z"
+    },
+    {
+      "id": "TASK-SIDEBAR-006",
+      "storyId": "STORY-SIDEBAR-003",
+      "title": "Validar segmentacion por companyId para administracion cliente",
+      "ownerRole": "access-policy-guardian",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Cliente solo opera sobre su companyId",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "SU opera sobre cualquier companyId",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-20T19:45:00.000Z"
+    },
+    {
+      "id": "TASK-SIDEBAR-007",
+      "storyId": "STORY-SIDEBAR-003",
+      "title": "Ejecutar pruebas E2E de sidebar, URL guard y configuracion por companyId",
+      "ownerRole": "qa-e2e-analyst",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Suite E2E cubre web para perfiles SU y cliente",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Reporte evidencia reglas de visibilidad y denegacion",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-20T19:45:00.000Z"
+    },
+    {
+      "id": "TASK-API-001",
+      "storyId": "STORY-API-001",
+      "title": "Implementar endpoint /api/v1/bd/[table] con operaciones CRUD",
+      "ownerRole": "backend-auth-integrator",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Create/Read/Update/Delete funciona en tabla valida",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Tabla inexistente retorna error controlado",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-22T18:17:05.076Z"
+    },
+    {
+      "id": "TASK-API-002",
+      "storyId": "STORY-API-001",
+      "title": "Definir modelo Prisma y tablas base de seguridad y negocio",
+      "ownerRole": "backend-auth-integrator",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Prisma schema contiene tablas requeridas",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Migraciones crean relaciones esperadas",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-22T18:17:12.843Z"
+    },
+    {
+      "id": "TASK-API-003",
+      "storyId": "STORY-API-002",
+      "title": "Aplicar middleware de autenticacion token + sesion OAuth",
+      "ownerRole": "backend-auth-integrator",
+      "status": "ToDo",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Token invalido o ausente retorna 401",
+          "done": false
+        },
+        {
+          "id": "T2",
+          "label": "Sesion expirada bloquea acceso",
           "done": false
         }
       ],
-      "updatedAt": "2026-05-20T13:46:17.742Z"
+      "updatedAt": "2026-05-20T20:05:00.000Z"
+    },
+    {
+      "id": "TASK-API-004",
+      "storyId": "STORY-API-002",
+      "title": "Configurar politica CORS con allowlist y rechazo de origen no autorizado",
+      "ownerRole": "cybersecurity-guardian",
+      "status": "ToDo",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Origen permitido accede correctamente",
+          "done": false
+        },
+        {
+          "id": "T2",
+          "label": "Origen no permitido es bloqueado",
+          "done": false
+        }
+      ],
+      "updatedAt": "2026-05-20T20:05:00.000Z"
+    },
+    {
+      "id": "TASK-API-005",
+      "storyId": "STORY-API-003",
+      "title": "Implementar control por scope en mismo endpoint: SU global vs cliente por companyId",
+      "ownerRole": "access-policy-guardian",
+      "status": "ToDo",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Scope SU obtiene datos globales",
+          "done": false
+        },
+        {
+          "id": "T2",
+          "label": "Scope cliente filtra por companyId de sesion",
+          "done": false
+        }
+      ],
+      "updatedAt": "2026-05-20T20:05:00.000Z"
+    },
+    {
+      "id": "TASK-API-006",
+      "storyId": "STORY-API-003",
+      "title": "Validar denegacion de intentos cross-company y registrar auditoria",
+      "ownerRole": "cybersecurity-guardian",
+      "status": "ToDo",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Intento cross-company retorna denegacion",
+          "done": false
+        },
+        {
+          "id": "T2",
+          "label": "Evento queda auditado con actor y tabla",
+          "done": false
+        }
+      ],
+      "updatedAt": "2026-05-20T20:05:00.000Z"
+    },
+    {
+      "id": "TASK-LOGIN-001",
+      "storyId": "STORY-LOGIN-001",
+      "title": "Implementar endpoint resolve para clasificar flujo social por estado y proveedor",
+      "ownerRole": "backend-auth-integrator",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Retorna FORM_REQUIRED para usuario nuevo/inactivo",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Retorna PROVIDER_CONFLICT si existe con otro proveedor",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-21T15:05:00.000Z"
+    },
+    {
+      "id": "TASK-LOGIN-002",
+      "storyId": "STORY-LOGIN-001",
+      "title": "Aplicar guard de acceso para estado PENDING_APPROVAL en rutas protegidas",
+      "ownerRole": "access-policy-guardian",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Usuario pendiente no entra a modulos internos",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Usuario activo si navega normalmente",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-21T15:05:00.000Z"
+    },
+    {
+      "id": "TASK-LOGIN-003",
+      "storyId": "STORY-LOGIN-002",
+      "title": "Construir formulario onboarding con campos obligatorios y estados UX",
+      "ownerRole": "ui-system-architect",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Submit deshabilitado hasta validez completa",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Render de estados loading/empty/error en catalogos",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-21T15:05:00.000Z"
+    },
+    {
+      "id": "TASK-LOGIN-004",
+      "storyId": "STORY-LOGIN-002",
+      "title": "Implementar selects dependientes pais->departamento->ciudad",
+      "ownerRole": "frontend-navigation-specialist",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Cambio de pais recarga departamentos",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Cambio de departamento recarga ciudades",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-21T15:05:00.000Z"
+    },
+    {
+      "id": "TASK-LOGIN-005",
+      "storyId": "STORY-LOGIN-002",
+      "title": "Exponer APIs de catalogos: companies, countries, departments, cities y multidata",
+      "ownerRole": "backend-auth-integrator",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "APIs de catalogo responden estructura valida",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Filtrado correcto de departamentos y ciudades",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-21T15:05:00.000Z"
+    },
+    {
+      "id": "TASK-LOGIN-006",
+      "storyId": "STORY-LOGIN-003",
+      "title": "Validar unicidad countryCode+dni y pertenencia a catalogos en submit",
+      "ownerRole": "cybersecurity-guardian",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Rechaza duplicado de dni en mismo pais",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Rechaza valores fuera de catalogo",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-21T15:05:00.000Z"
+    },
+    {
+      "id": "TASK-LOGIN-007",
+      "storyId": "STORY-LOGIN-003",
+      "title": "Persistir onboarding y transicionar a PENDING_APPROVAL con auditoria",
+      "ownerRole": "backend-auth-integrator",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Nuevo usuario queda PENDING_APPROVAL",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Inactivo actualizado queda PENDING_APPROVAL",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-21T15:05:00.000Z"
+    },
+    {
+      "id": "TASK-LOGIN-008",
+      "storyId": "STORY-LOGIN-003",
+      "title": "Crear semillas/altas de multidata para gender, countryCode, country, department y city",
+      "ownerRole": "backend-auth-integrator",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Catalogos base disponibles para formulario",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Valores nuevos pueden reutilizarse en futuros formularios",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-21T20:26:00.000Z"
+    },
+    {
+      "id": "TASK-LOGIN-009",
+      "storyId": "STORY-LOGIN-004",
+      "title": "Implementar bandeja admin de pendientes con acciones aprobar/rechazar",
+      "ownerRole": "ui-system-architect",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Lista de pendientes carga y filtra correctamente",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Aprobacion/rechazo actualiza estado de usuario",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-21T20:26:00.000Z"
+    },
+    {
+      "id": "TASK-LOGIN-010",
+      "storyId": "STORY-LOGIN-004",
+      "title": "Ejecutar pruebas E2E del flujo onboarding social completo",
+      "ownerRole": "qa-e2e-analyst",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Flujo nuevo->pendiente->aprobado exitoso",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Flujo inactivo y conflicto de proveedor cubiertos",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-21T20:26:00.000Z"
+    },
+    {
+      "id": "TASK-MODULES-001",
+      "storyId": "STORY-MODULES-001",
+      "title": "Redactar especificacion funcional/tecnica de modulos y guardarla en specs/modules",
+      "ownerRole": "backend-auth-integrator",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Spec creada con alcance funcional y tecnico",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Incluye restriccion de API dinamica y no archivos locales",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-22T22:00:00.000Z"
+    },
+    {
+      "id": "TASK-MODULES-002",
+      "storyId": "STORY-MODULES-002",
+      "title": "Crear migracion de tabla modules y constraints en PostgreSQL",
+      "ownerRole": "backend-auth-integrator",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Campos code,name,description,route,icon,sort_order,status,parent,scope_id",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Indices en code,status,sort_order",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-22T23:10:00.000Z"
+    },
+    {
+      "id": "TASK-MODULES-003",
+      "storyId": "STORY-MODULES-002",
+      "title": "Implementar reglas de dominio: SU muta, DELETE logico e integridad scope roleScope",
+      "ownerRole": "cybersecurity-guardian",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "No SU recibe 403 en POST/PATCH/DELETE",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "DELETE actualiza status a inactive",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-22T23:10:00.000Z"
+    },
+    {
+      "id": "TASK-MODULES-004",
+      "storyId": "STORY-MODULES-003",
+      "title": "Construir UI de Settings para configuracion de modulos",
+      "ownerRole": "ui-system-architect",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Listado y filtros visibles",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Formulario crear/editar funcional",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-22T23:10:00.000Z"
+    },
+    {
+      "id": "TASK-MODULES-005",
+      "storyId": "STORY-MODULES-003",
+      "title": "Sincronizar sidebar con modulos activos por scope y status",
+      "ownerRole": "frontend-navigation-specialist",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Modulos inactivos no renderizan",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Scope SU_ONLY visible solo para SU",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-22T23:40:00.000Z"
+    },
+    {
+      "id": "TASK-MODULES-006",
+      "storyId": "STORY-MODULES-003",
+      "title": "Ejecutar pruebas unitarias, integracion y E2E con datos en BD",
+      "ownerRole": "qa-e2e-analyst",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Suite cubre authz SU, scope roleScope y soft-delete",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Evidencia sin uso de archivos locales",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-26T00:10:00.000Z"
+    },
+    {
+      "id": "TASK-MODULES-007",
+      "storyId": "STORY-MODULES-004",
+      "title": "Implementar scaffold embedded con panel izquierdo y panel derecho",
+      "ownerRole": "ui-system-architect",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Paginas embedded se generan con layout de dos paneles",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Listado de hijos se renderiza en panel izquierdo",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-26T00:10:00.000Z"
+    },
+    {
+      "id": "TASK-MODULES-008",
+      "storyId": "STORY-MODULES-004",
+      "title": "Agregar CTA para hijos newPage desde pagina parent",
+      "ownerRole": "frontend-navigation-specialist",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Hijos newPage muestran boton de apertura",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Navegacion respeta locale y route del hijo",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-26T00:10:00.000Z"
+    },
+    {
+      "id": "TASK-MODULES-009",
+      "storyId": "STORY-MODULES-004",
+      "title": "Endurecer reglas backend para parent obligatorio y raiz '/'",
+      "ownerRole": "backend-auth-integrator",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "parent vacio falla con mensaje controlado",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "parent '/' se acepta como raiz",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-26T00:10:00.000Z"
+    },
+    {
+      "id": "TASK-MODULES-010",
+      "storyId": "STORY-MODULES-004",
+      "title": "Ajustar formulario con labels completos i18n y selects sin placeholders invalidos",
+      "ownerRole": "ui-system-architect",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Todos los campos muestran titulo",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "status/scope/content usan solo opciones de catalogo",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-26T00:10:00.000Z"
+    },
+    {
+      "id": "TASK-MODULES-011",
+      "storyId": "STORY-MODULES-004",
+      "title": "Validar compilacion final y retroalimentar tablero",
+      "ownerRole": "qa-e2e-analyst",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Build de web completo sin errores",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Backlog actualizado con estatus final",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-26T00:10:00.000Z"
     }
   ]
 }
