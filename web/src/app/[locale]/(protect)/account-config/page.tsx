@@ -4,7 +4,6 @@ import {getTranslations} from "next-intl/server";
 import {ProtectedSidebarLayout} from "@/components/protected-sidebar-layout";
 import {authOptions} from "@/lib/auth-options";
 import {resolveLoginNavigation} from "@/server/loginAccess";
-import {listActiveModulesForRole} from "@/server/pgDynamicDbStore";
 import {ModulesConfigClient} from "./ModulesConfigClient";
 
 type AccountConfigPageProps = {
@@ -35,16 +34,15 @@ export default async function AccountConfigPage({params}: AccountConfigPageProps
   const role: "SU" | "cliente" = rawRole === "su" ? "SU" : "cliente";
   const actorId = session.user.email ?? session.user.name ?? "anonymous";
   const companyId = (session.user as {companyId?: string | null}).companyId ?? null;
-  const dynamicModules = await listActiveModulesForRole(role).catch(() => []);
-
   return (
     <ProtectedSidebarLayout
       locale={locale}
       userName={session.user.name ?? "Usuario"}
       userEmail={session.user.email ?? ""}
       userImage={session.user.image ?? null}
-      permissions={["home:view", "scrum:view", "account-config:view"]}
-      dynamicModules={dynamicModules}
+      actorId={actorId}
+      actorRole={role}
+      companyId={companyId}
       title={t("layoutTitle")}
       description={t("layoutDescription")}
     >

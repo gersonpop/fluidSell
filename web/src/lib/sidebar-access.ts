@@ -30,6 +30,8 @@ export type DynamicModuleNav = {
   icon: string | null;
 };
 
+export type DbModuleRecord = Record<string, unknown>;
+
 function isSidebarModuleId(value: string): value is SidebarModuleId {
   return Object.prototype.hasOwnProperty.call(moduleToPermission, value);
 }
@@ -94,4 +96,47 @@ export function mergeDynamicModules(navItems: NavItem[], dynamicModules: Dynamic
     existing.add(dynamicModule.route);
   }
   return merged;
+}
+
+function toText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function toSortNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
+export function selectSidebarModulesFromDbRows(rows: DbModuleRecord[]) {
+  const normalized = rows
+    .map((row) => {
+      const id = toText(row.id);
+      const code = toText(row.code || row.id);
+      const name = toText(row.name);
+      const route = toText(row.route);
+      const icon = toText(row.icon);
+      const parentId = toText(row.parentId ?? row.parent);
+      const status = toText(row.status).toLowerCase();
+      const sortOrder = toSortNumber(row.order ?? row.sort_order ?? row.sortOrder);
+      return {id, code, name, route, icon, parentId, status, sortOrder};
+    })
+    .filter((item) => item.parentId === "/" && item.status === "active")
+    .sort((a, b) => {
+      if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+      return a.name.localeCompare(b.name);
+    });
+
+  return normalized
+    .filter((item) => item.name.length > 0 && item.route.length > 0)
+    .map<DynamicModuleNav>((item) => ({
+      id: item.id,
+      code: item.code,
+      name: item.name,
+      route: item.route,
+      icon: item.icon.length > 0 ? item.icon : null
+    }));
 }

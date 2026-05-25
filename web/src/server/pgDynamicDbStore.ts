@@ -172,8 +172,56 @@ function buildLeafPageContent(pageTitle: string) {
 }
 
 function buildEmbeddedPageContent(pageTitle: string, route: string) {
-  const safeRoute = route.replace(/'/g, "\\'");
-  return `import Link from \"next/link\";\nimport {getPgPool} from \"@/server/postgres\";\n\nexport default async function EmbeddedModulePage({params}: {params: Promise<{locale: string}>}) {\n  const {locale} = await params;\n  const pool = getPgPool();\n  const current = await pool.query<{id: string; name: string}>('select id, name from public.modules where route=$1 limit 1', ['${safeRoute}']);\n  const moduleId = current.rows[0]?.id ?? null;\n  const children = moduleId\n    ? (await pool.query<{id: string; name: string; route: string | null; sort_order: number; content: string | null}>(\n        'select id, name, route, sort_order, content from public.modules where parent=$1 and lower(status)=\\'active\\' order by sort_order asc, name asc',\n        [moduleId]\n      )).rows\n    : [];\n\n  return (\n    <section className=\"grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]\">\n      <aside className=\"rounded-2xl border border-slate-200 bg-slate-50 p-4\">\n        <h1 className=\"text-xl font-semibold capitalize\">${pageTitle}</h1>\n        <p className=\"mt-1 text-xs text-slate-500\">Embedded module navigation</p>\n        <ul className=\"mt-3 space-y-2\">\n          {children.map((item) => (\n            <li key={item.id}>\n              <Link\n                href={item.route ? \\`/\\${locale}\\${item.route}\\` : \\`/\\${locale}${safeRoute}\\`}\n                className=\"block rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:border-sky-300 hover:bg-sky-50\"\n              >\n                {item.name}\n              </Link>\n            </li>\n          ))}\n          {children.length === 0 ? <li className=\"text-xs text-slate-500\">No children configured.</li> : null}\n        </ul>\n      </aside>\n\n      <article className=\"rounded-2xl border border-slate-200 bg-white p-5 text-slate-700\">\n        <h2 className=\"text-lg font-semibold\">Content panel</h2>\n        <p className=\"mt-2 text-sm text-slate-500\">Select a child from the left panel. New-page children open via route. Embedded children can reuse this layout.</p>\n        <div className=\"mt-4 grid gap-2 sm:grid-cols-2\">\n          {children\n            .filter((item) => (item.content ?? '').toLowerCase() === 'newpage' && item.route)\n            .map((item) => (\n              <Link\n                key={item.id}\n                href={\\`/\\${locale}\\${item.route}\\`}\n                className=\"inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:border-sky-300 hover:bg-sky-50\"\n              >\n                Open {item.name}\n              </Link>\n            ))}\n        </div>\n      </article>\n    </section>\n  );\n}\n`;
+  const safeRoute = route.replace(/'/g, "\'");
+  return [
+    'import Link from "next/link";',
+    'import {getPgPool} from "@/server/postgres";',
+    '',
+    'export default async function EmbeddedModulePage({params}: {params: Promise<{locale: string}>}) {',
+    '  const {locale} = await params;',
+    '  const pool = getPgPool();',
+    `  const current = await pool.query<{id: string; name: string}>(\'select id, name from public.modules where route=$1 limit 1\', ['${safeRoute}']);`,
+    '  const moduleId = current.rows[0]?.id ?? null;',
+    '  const children = moduleId',
+    '    ? (await pool.query<{id: string; name: string; route: string | null; sort_order: number; content: string | null}>(',
+    '        "select id, name, route, sort_order, content from public.modules where parent=$1 and lower(status)=\'active\' order by sort_order asc, name asc",',
+    '        [moduleId]',
+    '      )).rows',
+    '    : [];',
+    '',
+    '  return (',
+    '    <section className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">',
+    '      <aside className="rounded-2xl border border-slate-200 bg-slate-50 p-4">',
+    `        <h1 className="text-xl font-semibold capitalize">${pageTitle}</h1>`,
+    '        <p className="mt-1 text-xs text-slate-500">Embedded module navigation</p>',
+    '        <ul className="mt-3 space-y-2">',
+    '          {children.map((item) => (',
+    '            <li key={item.id}>',
+    `              <Link href={item.route ? '/' + locale + item.route : '/' + locale + '${safeRoute}'} className="block rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:border-sky-300 hover:bg-sky-50">`,
+    '                {item.name}',
+    '              </Link>',
+    '            </li>',
+    '          ))}',
+    '          {children.length === 0 ? <li className="text-xs text-slate-500">No children configured.</li> : null}',
+    '        </ul>',
+    '      </aside>',
+    '',
+    '      <article className="rounded-2xl border border-slate-200 bg-white p-5 text-slate-700">',
+    '        <h2 className="text-lg font-semibold">Content panel</h2>',
+    '        <p className="mt-2 text-sm text-slate-500">Select a child from the left panel. New-page children open via route.</p>',
+    '        <div className="mt-4 grid gap-2 sm:grid-cols-2">',
+    "          {children.filter((item) => (item.content ?? '').toLowerCase() === 'newpage' && item.route).map((item) => (",
+    `            <Link key={item.id} href={'/' + locale + (item.route ?? '')} className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:border-sky-300 hover:bg-sky-50">`,
+    '              Open {item.name}',
+    '            </Link>',
+    '          ))}',
+    '        </div>',
+    '      </article>',
+    '    </section>',
+    '  );',
+    '}',
+    ''
+  ].join("\n");
 }
 
 async function ensureModuleRouteScaffold(route: string | null, pageContent: string) {

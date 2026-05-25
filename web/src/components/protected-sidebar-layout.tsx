@@ -2,20 +2,31 @@
 
 import {signOut} from "next-auth/react";
 import Link from "next/link";
-import Image from "next/image";
 import {usePathname} from "next/navigation";
 import {useEffect, useMemo, useRef, useState} from "react";
-import {filterNavItemsByPermissions, mergeDynamicModules, NAV_ITEMS, type DynamicModuleNav} from "@/lib/sidebar-access";
+import {
+  filterNavItemsByPermissions,
+  mergeDynamicModules,
+  NAV_ITEMS,
+  selectSidebarModulesFromDbRows,
+  type DynamicModuleNav
+} from "@/lib/sidebar-access";
 
 type SidebarMode = "compact" | "auto" | "fixed";
+
+function isImageIcon(value: string) {
+  const icon = value.trim().toLowerCase();
+  return icon.startsWith("data:image/") || icon.startsWith("http://") || icon.startsWith("https://") || icon.startsWith("/");
+}
 
 type ProtectedSidebarLayoutProps = {
   locale: string;
   userName: string;
   userEmail: string;
   userImage: string | null;
-  permissions?: string[];
-  dynamicModules?: DynamicModuleNav[];
+  actorId: string;
+  actorRole: "SU" | "cliente" | string;
+  companyId?: string | null;
   title?: string;
   description?: string;
   children?: React.ReactNode;
@@ -26,8 +37,9 @@ export function ProtectedSidebarLayout({
   userName,
   userEmail,
   userImage,
-  permissions = [],
-  dynamicModules = [],
+  actorId,
+  actorRole,
+  companyId = null,
   title = "Bienvenido",
   description = "Ingresaste con Google. Este panel simula datos de operacion, actividad de ventas y estado general para validar la interfaz protegida.",
   children
@@ -42,6 +54,10 @@ export function ProtectedSidebarLayout({
   const navScrollRef = useRef<HTMLDivElement | null>(null);
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [canScrollDown, setCanScrollDown] = useState(false);
+  const [dynamicModules, setDynamicModules] = useState<DynamicModuleNav[]>([]);
+  const [modulesLoading, setModulesLoading] = useState(true);
+  const [modulesError, setModulesError] = useState<string | null>(null);
+  const normalizedActorRole: "SU" | "cliente" = String(actorRole).trim().toLowerCase() === "su" ? "SU" : "cliente";
 
   const expanded = mode === "fixed" || (mode === "auto" && hoverExpanded);
   const compact = mode === "compact" || (mode === "auto" && !hoverExpanded);
@@ -53,9 +69,50 @@ export function ProtectedSidebarLayout({
   }, [expanded]);
 
   const navItems = useMemo(() => {
-    const filtered = filterNavItemsByPermissions(NAV_ITEMS, permissions);
-    return mergeDynamicModules(filtered, dynamicModules);
-  }, [permissions, dynamicModules]);
+    const base = filterNavItemsByPermissions(NAV_ITEMS, []);
+    return mergeDynamicModules(base, dynamicModules);
+  }, [dynamicModules]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadModules = async () => {
+      setModulesLoading(true);
+      setModulesError(null);
+      try {
+        const params = new URLSearchParams();
+        params.append("table", "modules");
+        const response = await fetch(`/api/v1/db/multi?${params.toString()}`, {
+          headers: {
+            Authorization: "Bearer local-dev-token",
+            "x-oauth-session": "active",
+            "x-actor-id": actorId,
+            "x-actor-role": normalizedActorRole,
+            "x-company-id": companyId ?? ""
+          }
+        });
+        const body = (await response.json()) as {modules?: Array<Record<string, unknown>>; message?: string};
+        if (!response.ok) {
+          throw new Error(body.message ?? "No se pudo cargar el menu");
+        }
+        if (cancelled) return;
+        const rows = Array.isArray(body.modules) ? body.modules : [];
+        setDynamicModules(selectSidebarModulesFromDbRows(rows));
+      } catch (error) {
+        if (!cancelled) {
+          setDynamicModules([]);
+          setModulesError(error instanceof Error ? error.message : "No se pudo cargar el menu");
+        }
+      } finally {
+        if (!cancelled) {
+          setModulesLoading(false);
+        }
+      }
+    };
+    void loadModules();
+    return () => {
+      cancelled = true;
+    };
+  }, [actorId, normalizedActorRole, companyId]);
 
   const updateScrollHints = () => {
     const element = navScrollRef.current;
@@ -116,13 +173,10 @@ export function ProtectedSidebarLayout({
               <div className={`flex items-center ${expanded ? "gap-3" : "justify-center"}`}>
                 <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-full border border-white/30 bg-white/10">
                   {userImage && !avatarError ? (
-                    <Image
+                    <img
                       src={userImage}
                       alt={userName}
-                      width={44}
-                      height={44}
                       referrerPolicy="no-referrer"
-                      unoptimized
                       onError={() => setAvatarError(true)}
                       className="h-full w-full object-cover"
                     />
@@ -181,6 +235,22 @@ export function ProtectedSidebarLayout({
               <p className={`px-2 pb-2 text-[10px] uppercase tracking-[0.18em] text-white/55 ${compact ? "text-center" : ""}`}>
                 {compact ? "Menu" : "Modulos"}
               </p>
+              {modulesError ? (
+                <div className="rounded-xl border border-rose-300/35 bg-rose-950/35 px-3 py-2 text-xs text-rose-100">
+                  No se pudo cargar el menu. Intenta de nuevo.
+                </div>
+              ) : null}
+              {modulesLoading ? (
+                <div className="space-y-2 px-2 py-1">
+                  <div className="h-8 animate-pulse rounded-lg bg-white/12" />
+                  <div className="h-8 animate-pulse rounded-lg bg-white/12" />
+                  <div className="h-8 animate-pulse rounded-lg bg-white/12" />
+                </div>
+              ) : null}
+              {!modulesLoading && !modulesError && navItems.length === 0 ? (
+                <div className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs text-white/85">Sin modulos disponibles</div>
+              ) : null}
+              {!modulesLoading && !modulesError ? (
               <nav className={compact ? "space-y-2" : "space-y-1"}>
                 {navItems.map((item) => {
                   const href = `/${locale}${item.path}`;
@@ -200,7 +270,11 @@ export function ProtectedSidebarLayout({
                     }`}
                   >
                     <span className={`grid place-items-center text-[22px] leading-none text-white/95 ${expanded ? "h-9 w-9" : "h-7 w-7"}`}>
-                      {item.icon}
+                      {isImageIcon(item.icon) ? (
+                        <img src={item.icon} alt="icon" className="h-5 w-5 object-contain" />
+                      ) : (
+                        item.icon
+                      )}
                     </span>
                     {expanded ? (
                       <>
@@ -215,6 +289,7 @@ export function ProtectedSidebarLayout({
                   </Link>
                 );})}
               </nav>
+              ) : null}
               </div>
             </div>
 

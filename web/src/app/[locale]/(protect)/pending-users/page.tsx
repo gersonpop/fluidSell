@@ -3,7 +3,6 @@ import {redirect} from "next/navigation";
 import {ProtectedSidebarLayout} from "@/components/protected-sidebar-layout";
 import {authOptions} from "@/lib/auth-options";
 import {listPendingApprovals} from "@/server/auth/onboarding";
-import {listActiveModulesForRole} from "@/server/pgDynamicDbStore";
 import {PendingUsersClient} from "./PendingUsersClient";
 
 type PendingUsersPageProps = {
@@ -18,8 +17,8 @@ export default async function PendingUsersPage({params}: PendingUsersPageProps) 
   }
 
   const pending = await listPendingApprovals();
-  const role = ((session.user as {role?: "SU" | "cliente"}).role ?? "SU") as "SU" | "cliente";
-  const dynamicModules = await listActiveModulesForRole(role).catch(() => []);
+  const rawRole = String((session.user as {role?: string}).role ?? "SU").trim().toLowerCase();
+  const role: "SU" | "cliente" = rawRole === "su" ? "SU" : "cliente";
 
   return (
     <ProtectedSidebarLayout
@@ -27,8 +26,9 @@ export default async function PendingUsersPage({params}: PendingUsersPageProps) 
       userName={session.user.name ?? "Usuario"}
       userEmail={session.user.email ?? ""}
       userImage={session.user.image ?? null}
-      permissions={["home:view", "scrum:view", "account-config:view"]}
-      dynamicModules={dynamicModules}
+      actorId={session.user.email ?? session.user.name ?? "anonymous"}
+      actorRole={role}
+      companyId={(session.user as {companyId?: string | null}).companyId ?? null}
       title="Pendientes de alta"
       description="Revision y aprobacion de usuarios registrados por redes sociales."
     >
