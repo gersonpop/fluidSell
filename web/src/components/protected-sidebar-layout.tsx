@@ -4,19 +4,19 @@ import {signOut} from "next-auth/react";
 import Link from "next/link";
 import {usePathname} from "next/navigation";
 import {useEffect, useMemo, useRef, useState} from "react";
-import {
-  filterNavItemsByPermissions,
-  mergeDynamicModules,
-  NAV_ITEMS,
-  selectSidebarModulesFromDbRows,
-  type DynamicModuleNav
-} from "@/lib/sidebar-access";
+import {selectSidebarModulesFromDbRows, type DynamicModuleNav} from "@/lib/sidebar-access";
 
 type SidebarMode = "compact" | "auto" | "fixed";
 
 function isImageIcon(value: string) {
   const icon = value.trim().toLowerCase();
   return icon.startsWith("data:image/") || icon.startsWith("http://") || icon.startsWith("https://") || icon.startsWith("/");
+}
+
+function normalizeTextIcon(value: string) {
+  const icon = value.trim();
+  if (icon.length === 1 || icon.length === 2) return icon;
+  return "◦";
 }
 
 type ProtectedSidebarLayoutProps = {
@@ -68,10 +68,16 @@ export function ProtectedSidebarLayout({
     return "w-[96px]";
   }, [expanded]);
 
-  const navItems = useMemo(() => {
-    const base = filterNavItemsByPermissions(NAV_ITEMS, []);
-    return mergeDynamicModules(base, dynamicModules);
-  }, [dynamicModules]);
+  const navItems = useMemo(
+    () =>
+      dynamicModules.map((item) => ({
+        id: item.id,
+        label: item.name,
+        icon: item.icon ?? "◦",
+        path: item.route ?? ""
+      })),
+    [dynamicModules]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -273,7 +279,7 @@ export function ProtectedSidebarLayout({
                       {isImageIcon(item.icon) ? (
                         <img src={item.icon} alt="icon" className="h-5 w-5 object-contain" />
                       ) : (
-                        item.icon
+                        normalizeTextIcon(item.icon)
                       )}
                     </span>
                     {expanded ? (
@@ -434,12 +440,9 @@ export function ProtectedSidebarLayout({
         </div>
       </aside>
 
-      <section className="relative z-10 min-w-0 flex-1 p-4 md:p-6">
-        <div className="h-full overflow-hidden rounded-3xl border border-white/20 bg-white/16 p-6 backdrop-blur-md">
-          <div className="mb-6 border-b border-white/20 pb-4">
-            <h1 className="text-3xl font-semibold tracking-tight text-white">{title}</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-white/85">{description}</p>
-          </div>
+      <section className="relative z-10 min-w-0 flex-1 p-2 md:p-2">
+        <div id="contentSidebar" className="h-full overflow-hidden rounded-3xl border border-white/20 bg-white/16 p-2 backdrop-blur-md">
+
 
           {children ?? (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">

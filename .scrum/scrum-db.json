@@ -291,8 +291,8 @@
         "Prueba de orden y filtrado en cliente",
         "Prueba visual de estados en sidebar"
       ],
-      "notes": "Fuente: specs/sidebar/spec-sidebar-integracion-modules.md",
-      "updatedAt": "2026-05-25T17:50:55.515Z"
+      "notes": "Alineado con specs/sidebar/spec-sidebar-integracion-modules.md: sidebar solo desde modules, parent=/ raiz, status active, setting embedded con hijos newPage.",
+      "updatedAt": "2026-05-26T15:49:11.329Z"
     }
   ],
   "tasks": [
@@ -855,6 +855,86 @@
         }
       ],
       "updatedAt": "2026-05-25T17:50:55.515Z"
+    },
+    {
+      "id": "TASK-SIDEBAR-012",
+      "storyId": "STORY-SIDEBAR-004",
+      "title": "Alinear sidebar para mostrar solo modulos raiz activos desde tabla modules",
+      "ownerRole": "frontend-navigation-specialist",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Implementacion alineada con spec",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Validacion funcional completada",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-26T15:49:11.329Z"
+    },
+    {
+      "id": "TASK-SIDEBAR-013",
+      "storyId": "STORY-SIDEBAR-004",
+      "title": "Implementar patron embedded con menuPanel y contentPanel para setting",
+      "ownerRole": "ui-system-architect",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Implementacion alineada con spec",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Validacion funcional completada",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-26T15:49:11.329Z"
+    },
+    {
+      "id": "TASK-SIDEBAR-014",
+      "storyId": "STORY-SIDEBAR-004",
+      "title": "Implementar patron newPage para modulos hijos y render en contentSidebar",
+      "ownerRole": "ui-system-architect",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Implementacion alineada con spec",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Validacion funcional completada",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-26T15:49:11.329Z"
+    },
+    {
+      "id": "TASK-SIDEBAR-015",
+      "storyId": "STORY-SIDEBAR-004",
+      "title": "Configurar page_content en DB para setting embedded e hijos newPage",
+      "ownerRole": "backend-auth-integrator",
+      "status": "Done",
+      "tests": [
+        {
+          "id": "T1",
+          "label": "Implementacion alineada con spec",
+          "done": true
+        },
+        {
+          "id": "T2",
+          "label": "Validacion funcional completada",
+          "done": true
+        }
+      ],
+      "updatedAt": "2026-05-26T15:49:11.329Z"
     }
   ]
 }
