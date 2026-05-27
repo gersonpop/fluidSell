@@ -13,7 +13,7 @@ export type ActorContext = {
 
 const TABLE_MAP = {
   modules: 'public.modules',
-  users: 'public.users',
+  users: 'public."PlatformUser"',
   oauth_sessions: 'public.oauth_sessions',
   roles: 'public.roles',
   role_assignments: 'public.role_assignments',
@@ -136,7 +136,7 @@ function normalizeModuleRoutePath(route: string | null) {
 async function resolveParentAwareRoute(route: string | null, parentId: string | null) {
   const currentSegments = normalizeModuleRoutePath(route);
   if (!currentSegments) return route ? route.trim() : null;
-  if (!parentId) {
+  if (!parentId || parentId === "/") {
     return `/${currentSegments.join("/")}`;
   }
 
@@ -167,84 +167,239 @@ function getLeafTitle(segments: string[]) {
   return segments.at(-1)?.replace(/[-_]/g, " ") ?? "module";
 }
 
-function buildLeafPageContent(pageTitle: string) {
-  return `export default function DynamicModulePage() {\n  return (\n    <section className=\"rounded-2xl border border-slate-200 bg-white p-5 text-slate-700\">\n      <h1 className=\"text-2xl font-semibold capitalize\">${pageTitle}</h1>\n      <p className=\"mt-2 text-sm text-slate-500\">This module page was scaffolded automatically from module configuration.</p>\n    </section>\n  );\n}\n`;
-}
-
-function buildEmbeddedPageContent(pageTitle: string, route: string) {
-  const safeRoute = route.replace(/'/g, "\'");
-  return [
-    'import Link from "next/link";',
-    'import {getPgPool} from "@/server/postgres";',
-    '',
-    'export default async function EmbeddedModulePage({params}: {params: Promise<{locale: string}>}) {',
-    '  const {locale} = await params;',
-    '  const pool = getPgPool();',
-    `  const current = await pool.query<{id: string; name: string}>(\'select id, name from public.modules where route=$1 limit 1\', ['${safeRoute}']);`,
-    '  const moduleId = current.rows[0]?.id ?? null;',
-    '  const children = moduleId',
-    '    ? (await pool.query<{id: string; name: string; route: string | null; sort_order: number; content: string | null}>(',
-    '        "select id, name, route, sort_order, content from public.modules where parent=$1 and lower(status)=\'active\' order by sort_order asc, name asc",',
-    '        [moduleId]',
-    '      )).rows',
-    '    : [];',
-    '',
-    '  return (',
-    '    <section className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">',
-    '      <aside className="rounded-2xl border border-slate-200 bg-slate-50 p-4">',
-    `        <h1 className="text-xl font-semibold capitalize">${pageTitle}</h1>`,
-    '        <p className="mt-1 text-xs text-slate-500">Embedded module navigation</p>',
-    '        <ul className="mt-3 space-y-2">',
-    '          {children.map((item) => (',
-    '            <li key={item.id}>',
-    `              <Link href={item.route ? '/' + locale + item.route : '/' + locale + '${safeRoute}'} className="block rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:border-sky-300 hover:bg-sky-50">`,
-    '                {item.name}',
-    '              </Link>',
-    '            </li>',
-    '          ))}',
-    '          {children.length === 0 ? <li className="text-xs text-slate-500">No children configured.</li> : null}',
-    '        </ul>',
-    '      </aside>',
-    '',
-    '      <article className="rounded-2xl border border-slate-200 bg-white p-5 text-slate-700">',
-    '        <h2 className="text-lg font-semibold">Content panel</h2>',
-    '        <p className="mt-2 text-sm text-slate-500">Select a child from the left panel. New-page children open via route.</p>',
-    '        <div className="mt-4 grid gap-2 sm:grid-cols-2">',
-    "          {children.filter((item) => (item.content ?? '').toLowerCase() === 'newpage' && item.route).map((item) => (",
-    `            <Link key={item.id} href={'/' + locale + (item.route ?? '')} className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:border-sky-300 hover:bg-sky-50">`,
-    '              Open {item.name}',
-    '            </Link>',
-    '          ))}',
-    '        </div>',
-    '      </article>',
-    '    </section>',
-    '  );',
-    '}',
-    ''
-  ].join("\n");
-}
-
 async function ensureModuleRouteScaffold(route: string | null, pageContent: string) {
   const segments = normalizeModuleRoutePath(route);
   if (!segments) return;
   const routeDir = join(process.cwd(), "src", "app", "[locale]", "(protect)", ...segments);
-  const pageFile = join(routeDir, "page.tsx");
 
   await mkdir(routeDir, {recursive: true});
   const pageTitle = getLeafTitle(segments);
   const normalized = normalizePageContentKind(pageContent);
+  const baseName = segments[segments.length - 1].toLowerCase();
+
   if (normalized === "embedded") {
-    await writeFile(pageFile, buildEmbeddedPageContent(pageTitle, route ?? `/${segments.join("/")}`), "utf8");
+    const layoutFile = join(routeDir, "layout.tsx");
+    const pageFile = join(routeDir, "page.tsx");
+
+    const layoutContent = `import {getServerSession} from "next-auth";
+import {redirect} from "next/navigation";
+import {authOptions} from "@/lib/auth-options";
+import {listRecords, type ActorContext} from "@/server/pgDynamicDbStore";
+import {selectSidebarModulesFromDbRows} from "@/lib/sidebar-access";
+import {ProtectedSidebarLayout} from "@/components/protected-sidebar-layout";
+import {EmbeddedPattern} from "@/components/module-patterns/EmbeddedPattern";
+
+type LayoutProps = {
+  params: Promise<{locale: string}>;
+  children: React.ReactNode;
+};
+
+export default async function DynamicEmbeddedLayout({params, children}: LayoutProps) {
+  const {locale} = await params;
+  const session = await getServerSession(authOptions);
+  if (!session?.user) redirect("/" + locale);
+
+  const rawRole = String((session.user as {role?: string}).role ?? "SU").trim().toLowerCase();
+  const role: "SU" | "cliente" = rawRole === "su" ? "SU" : "cliente";
+  const actor: ActorContext = {
+    actorId: session.user.email ?? session.user.name ?? "anonymous",
+    role,
+    companyId: (session.user as {companyId?: string | null}).companyId ?? null
+  };
+
+  const rows = (await listRecords(actor, "modules", null)) as Array<Record<string, any>>;
+  const initialSidebarModules = selectSidebarModulesFromDbRows(rows);
+
+  const currentRoute = "${route}";
+  const currentModule = rows.find(m => m.route === currentRoute && m.status === "active");
+  const childrenModules = rows
+    .filter(m => m.parent === currentModule?.id && m.status === "active")
+    .map(row => ({
+      id: String(row.id),
+      code: String(row.code),
+      name: String(row.name),
+      description: String(row.description ?? ""),
+      route: String(row.route),
+      icon: String(row.icon || "") || null,
+      parent: String(row.parent),
+      status: String(row.status),
+      pageContent: String(row.page_content || row.pageContent || ""),
+      sortOrder: Number(row.sort_order ?? row.sortOrder ?? 100)
+    }))
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  return (
+    <ProtectedSidebarLayout
+      locale={locale}
+      userName={session?.user?.name ?? "Usuario"}
+      userEmail={session?.user?.email ?? ""}
+      userImage={session?.user?.image ?? null}
+      actorId={actor.actorId}
+      actorRole={actor.role}
+      companyId={actor.companyId}
+      initialModules={initialSidebarModules}
+      title={currentModule?.name ?? "${pageTitle}"}
+      description={currentModule?.description ?? ""}
+    >
+      <EmbeddedPattern locale={locale} parentTitle={currentModule?.name ?? "${pageTitle}"} items={childrenModules}>
+        {children}
+      </EmbeddedPattern>
+    </ProtectedSidebarLayout>
+  );
+}`;
+
+    const pageContentTemplate = `import {getServerSession} from "next-auth";
+import {redirect} from "next/navigation";
+import {authOptions} from "@/lib/auth-options";
+import {listRecords, type ActorContext} from "@/server/pgDynamicDbStore";
+
+type PageProps = {
+  params: Promise<{locale: string}>;
+};
+
+export default async function DynamicEmbeddedPage({params}: PageProps) {
+  const {locale} = await params;
+  const session = await getServerSession(authOptions);
+  if (!session?.user) redirect("/" + locale);
+
+  const rawRole = String((session.user as {role?: string}).role ?? "SU").trim().toLowerCase();
+  const role: "SU" | "cliente" = rawRole === "su" ? "SU" : "cliente";
+  const actor: ActorContext = {
+    actorId: session.user.email ?? session.user.name ?? "anonymous",
+    role,
+    companyId: (session.user as {companyId?: string | null}).companyId ?? null
+  };
+
+  const rows = (await listRecords(actor, "modules", null)) as Array<Record<string, any>>;
+  const currentRoute = "${route}";
+  const currentModule = rows.find(m => m.route === currentRoute && m.status === "active");
+  const childrenModules = rows
+    .filter(m => m.parent === currentModule?.id && m.status === "active")
+    .sort((a, b) => Number(a.sort_order ?? a.sortOrder ?? 100) - Number(b.sort_order ?? b.sortOrder ?? 100));
+
+  if (childrenModules.length > 0) {
+    redirect("/" + locale + childrenModules[0].route);
+  }
+
+  return (
+    <section className="h-full w-full rounded-2xl border border-slate-200 bg-white p-5 text-slate-700">
+      <h1 className="text-2xl font-semibold">{currentModule?.description || currentModule?.name || "${pageTitle}"}</h1>
+      <p className="mt-2 text-sm text-slate-500">Módulo embebido. Agrega submódulos hijos para ver el contenido.</p>
+    </section>
+  );
+}`;
+
+    await writeFile(layoutFile, layoutContent, "utf8");
+    await writeFile(pageFile, pageContentTemplate, "utf8");
     return;
   }
+
   if (normalized === "newpage") {
-    try {
-      await access(pageFile, fsConstants.F_OK);
-      return;
-    } catch {
-      await writeFile(pageFile, buildLeafPageContent(pageTitle), "utf8");
-      return;
+    const pageFile = join(routeDir, "page.tsx");
+    const componentFile = join(routeDir, `component.${baseName}.tsx`);
+
+    const isRootModule = segments.length === 1;
+
+    let pageTemplate = "";
+    if (isRootModule) {
+      pageTemplate = `import {getServerSession} from "next-auth";
+import {redirect} from "next/navigation";
+import {authOptions} from "@/lib/auth-options";
+import {listRecords, type ActorContext} from "@/server/pgDynamicDbStore";
+import {selectSidebarModulesFromDbRows} from "@/lib/sidebar-access";
+import {ProtectedSidebarLayout} from "@/components/protected-sidebar-layout";
+import {NewPagePattern} from "@/components/module-patterns/NewPagePattern";
+import DynamicComponent from "./component.${baseName}";
+
+type PageProps = {
+  params: Promise<{locale: string}>;
+};
+
+export default async function DynamicNewPage({params}: PageProps) {
+  const {locale} = await params;
+  const session = await getServerSession(authOptions);
+  if (!session?.user) redirect("/" + locale);
+
+  const rawRole = String((session.user as {role?: string}).role ?? "SU").trim().toLowerCase();
+  const role: "SU" | "cliente" = rawRole === "su" ? "SU" : "cliente";
+  const actor: ActorContext = {
+    actorId: session.user.email ?? session.user.name ?? "anonymous",
+    role,
+    companyId: (session.user as {companyId?: string | null}).companyId ?? null
+  };
+
+  const rows = (await listRecords(actor, "modules", null)) as Array<Record<string, any>>;
+  const initialSidebarModules = selectSidebarModulesFromDbRows(rows);
+
+  const currentRoute = "${route}";
+  const currentModule = rows.find(m => m.route === currentRoute && m.status === "active");
+
+  return (
+    <ProtectedSidebarLayout
+      locale={locale}
+      userName={session?.user?.name ?? "Usuario"}
+      userEmail={session?.user?.email ?? ""}
+      userImage={session?.user?.image ?? null}
+      actorId={actor.actorId}
+      actorRole={actor.role}
+      companyId={actor.companyId}
+      initialModules={initialSidebarModules}
+      title={currentModule?.name ?? "${pageTitle}"}
+      description={currentModule?.description ?? ""}
+    >
+      <NewPagePattern
+        title={currentModule?.name ?? "${pageTitle}"}
+        description={currentModule?.description ?? ""}
+      >
+        <DynamicComponent />
+      </NewPagePattern>
+    </ProtectedSidebarLayout>
+  );
+}`;
+    } else {
+      pageTemplate = `import {NewPagePattern} from "@/components/module-patterns/NewPagePattern";
+import DynamicComponent from "./component.${baseName}";
+
+type PageProps = {
+  params: Promise<{locale: string}>;
+};
+
+export default async function DynamicNewPage({params}: PageProps) {
+  return (
+    <NewPagePattern
+      title="${pageTitle}"
+      description="${pageTitle}"
+    >
+      <DynamicComponent />
+    </NewPagePattern>
+  );
+}`;
     }
+
+    const componentTemplate = `"use client";
+
+export function DynamicComponent() {
+  return (
+    <section className="space-y-4">
+      <p className="text-sm text-slate-600">Este módulo se ha creado dinámicamente con contenido básico.</p>
+      <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+        <h2 className="text-base font-semibold text-slate-800">Contenido básico</h2>
+        <p className="mt-1 text-xs text-slate-500">Puedes editar este componente en \`component.${baseName}.tsx\` para agregar tu lógica de negocio.</p>
+      </div>
+    </section>
+  );
+}
+
+export default DynamicComponent;`;
+
+    await writeFile(pageFile, pageTemplate, "utf8");
+
+    try {
+      await access(componentFile, fsConstants.F_OK);
+    } catch {
+      await writeFile(componentFile, componentTemplate, "utf8");
+    }
+    return;
   }
 }
 
@@ -388,6 +543,95 @@ export async function listActiveModulesForRole(role: ActorScope) {
   }).map((row) => ({id: row.id, code: row.code, name: row.name, route: row.route, icon: row.icon}));
 }
 
+const PK_MAP = {
+  modules: 'id',
+  users: 'id_user_pk',
+  oauth_sessions: 'id',
+  roles: 'id',
+  role_assignments: 'id',
+  audit_logs: 'id',
+  st_multidata: 'value',
+  st_country: 'iso',
+  st_state: 'id_state',
+  st_city: 'id_city'
+} as const;
+
+async function createPlatformUserRecord(actor: ActorContext, payload: Record<string, unknown>) {
+  ensureSu(actor);
+  const email = String(payload.user_email || payload.email || "").trim().toLowerCase();
+  const name = String(payload.name || payload.firstName || "").trim();
+  const lastName = String(payload.last_name || payload.lastName || "").trim();
+  const phone = String(payload.phone_number || payload.phone || "").trim();
+  const companyId = payload.companyId ? String(payload.companyId).trim() : (actor.role !== "SU" ? actor.companyId : "900000000");
+  const countryCode = String(payload.country_code || "+57").trim();
+  const countryIso = String(payload.country_iso || "CO").trim();
+  const status = String(payload.status || "active").trim();
+  const provider = String(payload.provider || "google").trim();
+  
+  if (!email || !name) throw new Error("user_email and name are required");
+  
+  const id = `USR-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const username = email;
+  
+  const result = await getPgPool().query(
+    `INSERT INTO public."PlatformUser" (
+      id_user_pk, user_email, username, name, last_name, phone_number, "companyId", 
+      country_code, country_iso, dni, birth_date, gender, status, provider, avatar, position, created_at, updated_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,now(),now()) returning *`,
+    [
+      id, email, username, name, lastName, phone, companyId,
+      countryCode, countryIso, payload.dni ? String(payload.dni) : null,
+      payload.birth_date ? new Date(String(payload.birth_date)) : null,
+      payload.gender ? String(payload.gender) : null,
+      status, provider, payload.avatar ? String(payload.avatar) : null,
+      payload.position ? String(payload.position) : null
+    ]
+  );
+  return result.rows[0];
+}
+
+async function updatePlatformUserRecord(actor: ActorContext, id: string, patch: Record<string, unknown>) {
+  ensureSu(actor);
+  const current = await getPgPool().query('SELECT * FROM public."PlatformUser" WHERE id_user_pk=$1 LIMIT 1', [id]);
+  if ((current.rowCount ?? 0) === 0) throw new Error("User not found");
+
+  const row = current.rows[0];
+  const email = patch.user_email !== undefined ? String(patch.user_email).trim().toLowerCase() : row.user_email;
+  const name = patch.name !== undefined ? String(patch.name).trim() : row.name;
+  const lastName = patch.last_name !== undefined ? String(patch.last_name).trim() : row.last_name;
+  const phone = patch.phone_number !== undefined ? String(patch.phone_number).trim() : row.phone_number;
+  const companyId = patch.companyId !== undefined ? String(patch.companyId).trim() : row.companyId;
+  const countryCode = patch.country_code !== undefined ? String(patch.country_code).trim() : row.country_code;
+  const countryIso = patch.country_iso !== undefined ? String(patch.country_iso).trim() : row.country_iso;
+  const status = patch.status !== undefined ? String(patch.status).trim() : row.status;
+  const provider = patch.provider !== undefined ? String(patch.provider).trim() : row.provider;
+  const dni = patch.dni !== undefined ? (patch.dni ? String(patch.dni) : null) : row.dni;
+  const birthDate = patch.birth_date !== undefined ? (patch.birth_date ? new Date(String(patch.birth_date)) : null) : row.birth_date;
+  const gender = patch.gender !== undefined ? (patch.gender ? String(patch.gender) : null) : row.gender;
+  const avatar = patch.avatar !== undefined ? (patch.avatar ? String(patch.avatar) : null) : row.avatar;
+  const position = patch.position !== undefined ? (patch.position ? String(patch.position) : null) : row.position;
+
+  const result = await getPgPool().query(
+    `UPDATE public."PlatformUser" SET 
+      user_email=$1, username=$2, name=$3, last_name=$4, phone_number=$5, "companyId"=$6, 
+      country_code=$7, country_iso=$8, dni=$9, birth_date=$10, gender=$11, status=$12, 
+      provider=$13, avatar=$14, position=$15, updated_at=now() 
+     WHERE id_user_pk=$16 returning *`,
+    [
+      email, email, name, lastName, phone, companyId,
+      countryCode, countryIso, dni, birthDate, gender, status,
+      provider, avatar, position, id
+    ]
+  );
+  return result.rows[0];
+}
+
+async function deletePlatformUserRecord(actor: ActorContext, id: string) {
+  ensureSu(actor);
+  const result = await getPgPool().query('DELETE FROM public."PlatformUser" WHERE id_user_pk=$1 RETURNING id_user_pk', [id]);
+  if ((result.rowCount ?? 0) === 0) throw new Error("User not found");
+}
+
 export async function listRecords(actor: ActorContext, tableParam: string, id: string | null) {
   const table = normalizeTable(tableParam);
   if (table === "modules") {
@@ -406,13 +650,16 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
   const dbTable = TABLE_MAP[table];
   let query = `select * from ${dbTable}`;
   const values: string[] = [];
+  const pkColumn = PK_MAP[table] || 'id';
+
   if (id) {
-    query += " where id=$1";
+    query += ` where "${pkColumn}"=$1`;
     values.push(id);
   }
   if (actor.role !== "SU" && COMPANY_SCOPED_TABLES.has(table)) {
     if (!actor.companyId) throw new Error("companyId is required for non-SU actors");
-    query += id ? " and companyid=$2" : " where companyid=$1";
+    const companyCol = table === "users" ? '"companyId"' : 'companyid';
+    query += id ? ` and ${companyCol}=$2` : ` where ${companyCol}=$1`;
     values.push(actor.companyId);
   }
   const result = await getPgPool().query(query, values);
@@ -423,6 +670,7 @@ export async function createRecord(actor: ActorContext, tableParam: string, payl
   const table = normalizeTable(tableParam);
   if (table === "modules") return createModuleRecord(actor, payload);
   if (table === "st_multidata") return createStMultidataRecord(actor, payload);
+  if (table === "users") return createPlatformUserRecord(actor, payload);
   ensureSu(actor);
   throw new Error(`Create is not enabled for table '${table}'`);
 }
@@ -431,6 +679,7 @@ export async function updateRecord(actor: ActorContext, tableParam: string, id: 
   const table = normalizeTable(tableParam);
   if (table === "modules") return updateModuleRecord(actor, id, patch);
   if (table === "st_multidata") return updateStMultidataRecord(actor, id, patch);
+  if (table === "users") return updatePlatformUserRecord(actor, id, patch);
   ensureSu(actor);
   throw new Error(`Update is not enabled for table '${table}'`);
 }
@@ -443,6 +692,10 @@ export async function deleteRecord(actor: ActorContext, tableParam: string, id: 
   }
   if (table === "st_multidata") {
     await deleteStMultidataRecord(actor, id);
+    return;
+  }
+  if (table === "users") {
+    await deletePlatformUserRecord(actor, id);
     return;
   }
   ensureSu(actor);
