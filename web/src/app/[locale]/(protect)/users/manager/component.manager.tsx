@@ -14,14 +14,45 @@ export function DataManager() {
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set(DEFAULT_COLUMNS));
-  const [openRowMenu, setOpenRowMenu] = useState<number | null>(null);
-  
-  // Drawer state
   const [openDrawer, setOpenDrawer] = useState(false);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [saving, setSaving] = useState(false);
   const [actionMode, setActionMode] = useState("add"); // "add" | "edit"
   const [selectedRow, setSelectedRow] = useState<any>(null);
+
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void | Promise<void>;
+    confirmLabel?: string;
+    confirmVariant?: "danger" | "warning";
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {}
+  });
+
+  const showConfirm = (
+    title: string,
+    message: string,
+    onConfirm: () => void | Promise<void>,
+    confirmLabel = "Confirmar",
+    confirmVariant: "danger" | "warning" = "danger"
+  ) => {
+    setConfirmModal({
+      isOpen: true,
+      title,
+      message,
+      onConfirm: async () => {
+        await onConfirm();
+        setConfirmModal((prev) => ({...prev, isOpen: false}));
+      },
+      confirmLabel,
+      confirmVariant
+    });
+  };
   
   // Form State
   const [form, setForm] = useState({
@@ -89,9 +120,7 @@ export function DataManager() {
   }, [load]);
 
   useEffect(() => {
-    const closeMenu = () => setOpenRowMenu(null);
-    window.addEventListener("click", closeMenu);
-    return () => window.removeEventListener("click", closeMenu);
+    // No-op window listener (menu removed)
   }, []);
 
   const filteredRows = useMemo(() => {
@@ -204,21 +233,27 @@ export function DataManager() {
   };
 
   const deleteItem = async (rowId: any) => {
-    const ok = window.confirm("¿Estás seguro de que deseas eliminar este usuario?");
-    if (!ok) return;
-    setError("");
-    try {
-      const response = await fetch("/api/v1/db/users", {
-        method: "DELETE",
-        headers: {...headers, "content-type": "application/json"},
-        body: JSON.stringify({id: String(rowId || "")})
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body?.message || "No se pudo eliminar");
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo eliminar");
-    }
+    showConfirm(
+      "¿Eliminar este usuario?",
+      "Esta acción es irreversible y removerá permanentemente al usuario de la plataforma. ¿Deseas continuar?",
+      async () => {
+        setError("");
+        try {
+          const response = await fetch("/api/v1/db/users", {
+            method: "DELETE",
+            headers: {...headers, "content-type": "application/json"},
+            body: JSON.stringify({id: String(rowId || "")})
+          });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body?.message || "No se pudo eliminar");
+          await load();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "No se pudo eliminar");
+        }
+      },
+      "Eliminar",
+      "danger"
+    );
   };
 
   const toggleColumn = (columnKey: string) => {
@@ -337,7 +372,7 @@ export function DataManager() {
               <thead className="bg-slate-50 text-left text-slate-500 font-medium">
                 <tr className="border-b border-slate-200">
                   {headerColumns.map((column) => (
-                    <th key={column.key} className="px-4 py-3 font-semibold text-slate-600">{column.label}</th>
+                    <th key={column.key} className={`px-4 py-3 font-semibold text-slate-600 ${column.key === "actions" ? "text-center" : ""}`}>{column.label}</th>
                   ))}
                 </tr>
               </thead>
@@ -360,23 +395,41 @@ export function DataManager() {
                       }
                       if (column.key === "actions") {
                         return (
-                          <td key={`actions-${index}`} className="relative px-4 py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setOpenRowMenu((prev) => (prev === index ? null : index));
-                              }}
-                              className="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-200 transition"
-                            >
-                              ⋮
-                            </button>
-                            {openRowMenu === index ? (
-                              <div className="absolute right-4 z-10 mt-1 w-28 rounded-lg border border-slate-200 bg-white p-1 shadow-lg text-left">
-                                <button type="button" onClick={() => openEditDrawer(row)} className="block w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-slate-50">Editar</button>
-                                <button type="button" onClick={() => deleteItem(row?.id_user_pk)} className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-rose-700 hover:bg-rose-50">Eliminar</button>
+                          <td key={`actions-${index}`} className="px-4 py-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              {/* Editar (Lápiz Azul) */}
+                              <div className="group relative">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditDrawer(row)}
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 shadow-sm hover:bg-blue-100 hover:border-blue-300 hover:text-blue-700 transition duration-150"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" className="h-4.5 w-4.5">
+                                    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                                    <path d="m15 5 4 4" />
+                                  </svg>
+                                </button>
+                                <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                  Editar
+                                </span>
                               </div>
-                            ) : null}
+
+                              {/* Eliminar (Basura Roja) */}
+                              <div className="group relative">
+                                <button
+                                  type="button"
+                                  onClick={() => void deleteItem(row?.id_user_pk)}
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 shadow-sm hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 transition duration-150"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4.5 w-4.5">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                                  </svg>
+                                </button>
+                                <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                  Eliminar
+                                </span>
+                              </div>
+                            </div>
                           </td>
                         );
                       }
@@ -593,6 +646,40 @@ export function DataManager() {
               </button>
             </div>
           </aside>
+        </div>
+      ) : null}
+      {confirmModal.isOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm transition-opacity duration-200" onClick={() => setConfirmModal((prev) => ({...prev, isOpen: false}))} />
+          <div className="relative z-10 w-full max-w-md transform rounded-2xl bg-white p-6 shadow-2xl transition-all duration-200 scale-100 opacity-100 border border-slate-100">
+            <div className="flex flex-col items-center text-center">
+              <div className={`flex h-12 w-12 items-center justify-center rounded-full ${confirmModal.confirmVariant === "danger" ? "bg-rose-50 text-rose-600" : "bg-amber-50 text-amber-600"} mb-4`}>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-6 w-6">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-slate-800">{confirmModal.title}</h3>
+              <p className="mt-2 text-sm text-slate-500 leading-relaxed">{confirmModal.message}</p>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmModal((prev) => ({...prev, isOpen: false}))}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void confirmModal.onConfirm();
+                }}
+                className={`rounded-xl ${confirmModal.confirmVariant === "danger" ? "bg-rose-600 hover:bg-rose-700 text-white" : "bg-amber-500 hover:bg-amber-600 text-slate-900"} px-5 py-2.5 text-sm font-semibold transition shadow-sm`}
+              >
+                {confirmModal.confirmLabel}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </section>

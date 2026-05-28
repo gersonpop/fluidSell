@@ -84,7 +84,14 @@
       "sort_order": "Orden",
       "parent": "Padre",
       "scope_id": "Scope",
-      "content": "Contenido"
+      "content": "Contenido",
+      "Initials_PK": "Iniciales",
+      "value": "Valor",
+      "type": "Categoría",
+      "typeDescription": "Descrip. categoría",
+      "typeUse": "Tipo de uso",
+      "created_at": "Creado",
+      "updated_at": "Actualizado"
     },
     "actions": {
       "edit": "Editar",

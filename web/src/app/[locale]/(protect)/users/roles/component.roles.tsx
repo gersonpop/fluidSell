@@ -153,6 +153,40 @@ export function DynamicComponent() {
   const [modalInputValue, setModalInputValue] = useState("");
   const [modalModuleName, setModalModuleName] = useState("");
 
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void | Promise<void>;
+    confirmLabel?: string;
+    confirmVariant?: "danger" | "warning";
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {}
+  });
+
+  const showConfirm = (
+    title: string,
+    message: string,
+    onConfirm: () => void | Promise<void>,
+    confirmLabel = "Confirmar",
+    confirmVariant: "danger" | "warning" = "danger"
+  ) => {
+    setConfirmModal({
+      isOpen: true,
+      title,
+      message,
+      onConfirm: async () => {
+        await onConfirm();
+        setConfirmModal((prev) => ({...prev, isOpen: false}));
+      },
+      confirmLabel,
+      confirmVariant
+    });
+  };
+
   const openCreateModal = (moduleId: string, moduleName: string) => {
     setModalType("create");
     setModalModuleId(moduleId);
@@ -516,34 +550,40 @@ export function DynamicComponent() {
   };
 
   const handleDeleteRole = async () => {
-    const ok = window.confirm("¿Seguro que deseas eliminar este rol?");
-    if (!ok) return;
-    setSaving(true);
-    try {
-      const response = await fetch("/api/v1/db/roles", {
-        method: "DELETE",
-        headers: {...headers, "content-type": "application/json"},
-        body: JSON.stringify({ id: selectedRoleId })
-      });
-      if (!response.ok) throw new Error("No se pudo eliminar el rol");
-      
-      if (typeof window !== "undefined") {
-        localStorage.removeItem(ROLES_CACHE_KEY);
-      }
-      
-      const roleRes = await fetch("/api/v1/db/roles", {headers});
-      const roleBody = await roleRes.json();
-      const fetchedRoles = Array.isArray(roleBody?.data) ? roleBody.data : [];
-      setRoles(fetchedRoles);
-      if (fetchedRoles.length > 0) {
-        setSelectedRoleId(fetchedRoles[0].id);
-      }
-      setIsEditing(false);
-    } catch {
-      setError("No fue posible eliminar el rol.");
-    } finally {
-      setSaving(false);
-    }
+    showConfirm(
+      "¿Eliminar este rol?",
+      "Esta acción es irreversible y removerá todos los privilegios asociados a este cargo. ¿Deseas continuar?",
+      async () => {
+        setSaving(true);
+        try {
+          const response = await fetch("/api/v1/db/roles", {
+            method: "DELETE",
+            headers: {...headers, "content-type": "application/json"},
+            body: JSON.stringify({ id: selectedRoleId })
+          });
+          if (!response.ok) throw new Error("No se pudo eliminar el rol");
+          
+          if (typeof window !== "undefined") {
+            localStorage.removeItem(ROLES_CACHE_KEY);
+          }
+          
+          const roleRes = await fetch("/api/v1/db/roles", {headers});
+          const roleBody = await roleRes.json();
+          const fetchedRoles = Array.isArray(roleBody?.data) ? roleBody.data : [];
+          setRoles(fetchedRoles);
+          if (fetchedRoles.length > 0) {
+            setSelectedRoleId(fetchedRoles[0].id);
+          }
+          setIsEditing(false);
+        } catch {
+          setError("No fue posible eliminar el rol.");
+        } finally {
+          setSaving(false);
+        }
+      },
+      "Eliminar",
+      "danger"
+    );
   };
 
   return (
@@ -778,40 +818,52 @@ export function DynamicComponent() {
                                       {isEditing && (
                                         <div className="flex items-center gap-1.5 flex-shrink-0">
                                           {/* EDIT BUTTON */}
-                                          <button
-                                            type="button"
-                                            onClick={() => openEditModal(item.id, micro.key, micro.label)}
-                                            className="border border-slate-200 bg-white hover:bg-slate-50 p-1 rounded-md text-slate-600 transition shadow-sm"
-                                            title="Editar"
-                                          >
-                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
-                                              <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125" />
-                                            </svg>
-                                          </button>
+                                          <div className="group relative">
+                                            <button
+                                              type="button"
+                                              onClick={() => openEditModal(item.id, micro.key, micro.label)}
+                                              className="flex h-7 w-7 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 shadow-sm hover:bg-blue-100 hover:border-blue-300 hover:text-blue-700 transition duration-150"
+                                            >
+                                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125" />
+                                              </svg>
+                                            </button>
+                                            <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2 py-0.5 text-[10px] font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                              Editar
+                                            </span>
+                                          </div>
 
                                           {/* DELETE BUTTON */}
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              const ok = window.confirm(`¿Seguro que deseas eliminar el microrol "${micro.label}"?`);
-                                              if (ok) {
-                                                setCustomMicroRoles((prev) => {
-                                                  const list = prev[item.id] || [];
-                                                  return {
-                                                    ...prev,
-                                                    [item.id]: list.filter((it) => it.key !== micro.key)
-                                                  };
-                                                });
-                                              }
-                                            }}
-                                            className="border border-slate-200 bg-white hover:bg-slate-50 p-1 rounded-md text-slate-600 transition shadow-sm hover:text-red-500"
-                                            title="Eliminar"
-                                          >
-                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
-                                              <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.34 6m-4.78 0L9 9m12 6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6h16v9Z" />
-                                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5h6M10 2h4" />
-                                            </svg>
-                                          </button>
+                                          <div className="group relative">
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                showConfirm(
+                                                  "¿Eliminar microrol?",
+                                                  `¿Seguro que deseas eliminar el microrol "${micro.label}"?`,
+                                                  () => {
+                                                    setCustomMicroRoles((prev) => {
+                                                      const list = prev[item.id] || [];
+                                                      return {
+                                                        ...prev,
+                                                        [item.id]: list.filter((it) => it.key !== micro.key)
+                                                      };
+                                                    });
+                                                  },
+                                                  "Eliminar",
+                                                  "danger"
+                                                );
+                                              }}
+                                              className="flex h-7 w-7 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 shadow-sm hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 transition duration-150"
+                                            >
+                                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="w-3.5 h-3.5">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                                              </svg>
+                                            </button>
+                                            <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2 py-0.5 text-[10px] font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                              Eliminar
+                                            </span>
+                                          </div>
                                         </div>
                                       )}
                                     </div>
@@ -920,6 +972,40 @@ export function DynamicComponent() {
           </form>
         </div>
       )}
+      {confirmModal.isOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm transition-opacity duration-200" onClick={() => setConfirmModal((prev) => ({...prev, isOpen: false}))} />
+          <div className="relative z-10 w-full max-w-md transform rounded-2xl bg-white p-6 shadow-2xl transition-all duration-200 scale-100 opacity-100 border border-slate-100">
+            <div className="flex flex-col items-center text-center">
+              <div className={`flex h-12 w-12 items-center justify-center rounded-full ${confirmModal.confirmVariant === "danger" ? "bg-rose-50 text-rose-600" : "bg-amber-50 text-amber-600"} mb-4`}>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-6 w-6">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-slate-800">{confirmModal.title}</h3>
+              <p className="mt-2 text-sm text-slate-500 leading-relaxed">{confirmModal.message}</p>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmModal((prev) => ({...prev, isOpen: false}))}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void confirmModal.onConfirm();
+                }}
+                className={`rounded-xl ${confirmModal.confirmVariant === "danger" ? "bg-rose-600 hover:bg-rose-700 text-white" : "bg-amber-500 hover:bg-amber-600 text-slate-900"} px-5 py-2.5 text-sm font-semibold transition shadow-sm`}
+              >
+                {confirmModal.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

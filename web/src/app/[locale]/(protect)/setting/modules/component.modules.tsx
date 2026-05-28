@@ -98,6 +98,40 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
   const [iconPreview, setIconPreview] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof typeof defaultForm, string>>>({});
 
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void | Promise<void>;
+    confirmLabel?: string;
+    confirmVariant?: "danger" | "warning";
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {}
+  });
+
+  const showConfirm = (
+    title: string,
+    message: string,
+    onConfirm: () => void | Promise<void>,
+    confirmLabel = "Confirmar",
+    confirmVariant: "danger" | "warning" = "danger"
+  ) => {
+    setConfirmModal({
+      isOpen: true,
+      title,
+      message,
+      onConfirm: async () => {
+        await onConfirm();
+        setConfirmModal((prev) => ({...prev, isOpen: false}));
+      },
+      confirmLabel,
+      confirmVariant
+    });
+  };
+
   const pageSize = rowsPerPage;
 
   const headers = useMemo(
@@ -352,29 +386,36 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
   }
 
   async function onChangeStatus(item: ModuleItem, nextStatus: "active" | "inactive") {
-    const confirmation = window.confirm(
-      nextStatus === "inactive"
-        ? t("confirm.deactivate", {name: item.name})
-        : t("confirm.reactivate", {name: item.name})
+    const title = nextStatus === "inactive" ? t("actions.deactivate") : t("actions.reactivate");
+    const message = nextStatus === "inactive"
+      ? t("confirm.deactivate", {name: item.name})
+      : t("confirm.reactivate", {name: item.name});
+
+    showConfirm(
+      title,
+      message,
+      async () => {
+        setSaving(true);
+        try {
+          const response = await fetch("/api/v1/db/modules", {
+            method: nextStatus === "inactive" ? "DELETE" : "PATCH",
+            headers,
+            body: JSON.stringify(nextStatus === "inactive" ? {id: item.id} : {id: item.id, status: "active"})
+          });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.message ?? t("errors.status"));
+          setSuccess(nextStatus === "inactive" ? t("success.deactivated") : t("success.reactivated"));
+          await loadData();
+          router.refresh();
+        } catch (statusError) {
+          setError(statusError instanceof Error ? statusError.message : t("errors.status"));
+        } finally {
+          setSaving(false);
+        }
+      },
+      nextStatus === "inactive" ? "Desactivar" : "Reactivar",
+      nextStatus === "inactive" ? "danger" : "warning"
     );
-    if (!confirmation) return;
-    setSaving(true);
-    try {
-      const response = await fetch("/api/v1/db/modules", {
-        method: nextStatus === "inactive" ? "DELETE" : "PATCH",
-        headers,
-        body: JSON.stringify(nextStatus === "inactive" ? {id: item.id} : {id: item.id, status: "active"})
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.message ?? t("errors.status"));
-      setSuccess(nextStatus === "inactive" ? t("success.deactivated") : t("success.reactivated"));
-      await loadData();
-      router.refresh();
-    } catch (statusError) {
-      setError(statusError instanceof Error ? statusError.message : t("errors.status"));
-    } finally {
-      setSaving(false);
-    }
   }
 
   function setSort(column: keyof ModuleItem) {
@@ -490,7 +531,7 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
               <thead className="bg-slate-100 text-left text-slate-500">
                 <tr>
                   {headerColumns.map((column) => (
-                    <th key={column.key} className="px-4 py-3">
+                    <th key={column.key} className={`px-4 py-3 ${column.key === "actions" ? "text-center" : ""}`}>
                       {column.key !== "actions" && column.key !== "icon" ? (
                         <button className="font-medium" onClick={() => setSort(column.key as keyof ModuleItem)}>{column.label}</button>
                       ) : (
@@ -534,31 +575,54 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
                         return <td key={`${item.id}-content`} className="px-4 py-3">{contentLabel}</td>;
                       }
                       if (column.key === "updated_at") return <td key={`${item.id}-updated`} className="px-4 py-3">{item.updated_at ? new Date(item.updated_at).toLocaleString() : "-"}</td>;
-                      const isNearBottom = pagedModules.length > 2 && rowIndex >= pagedModules.length - 2;
                       return (
-                        <td key={`${item.id}-actions`} className="relative px-4 py-3 text-right">
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setOpenRowMenu((current) => (current === item.id ? null : item.id));
-                            }}
-                            className="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100"
-                          >
-                            ⋮
-                          </button>
-                          {openRowMenu === item.id ? (
-                            <div className={`absolute right-4 z-30 w-36 rounded-lg border border-slate-200 bg-white p-1 shadow-lg ${
-                              isNearBottom ? "bottom-full mb-1" : "top-full mt-1"
-                            }`}>
-                              <button type="button" onClick={() => onEdit(item)} className="block w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-slate-50">{t("actions.edit")}</button>
-                              {item.status === "active" ? (
-                                <button type="button" onClick={() => void onChangeStatus(item, "inactive")} className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-rose-700 hover:bg-rose-50">{t("actions.deactivate")}</button>
-                              ) : (
-                                <button type="button" onClick={() => void onChangeStatus(item, "active")} className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-emerald-700 hover:bg-emerald-50">{t("actions.reactivate")}</button>
-                              )}
+                        <td key={`${item.id}-actions`} className="px-4 py-3 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            {/* Editar (Lápiz Azul) */}
+                            <div className="group relative">
+                              <button
+                                type="button"
+                                onClick={() => onEdit(item)}
+                                className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 shadow-sm hover:bg-blue-100 hover:border-blue-300 hover:text-blue-700 transition duration-150"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" className="h-4.5 w-4.5">
+                                  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                                  <path d="m15 5 4 4" />
+                                </svg>
+                              </button>
+                              <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                {t("actions.edit")}
+                              </span>
                             </div>
-                          ) : null}
+
+                            {/* Desactivar / Reactivar (Basura / Check) */}
+                            <div className="group relative">
+                              {item.status === "active" ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void onChangeStatus(item, "inactive")}
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 shadow-sm hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 transition duration-150"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4.5 w-4.5">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                                  </svg>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => void onChangeStatus(item, "active")}
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-600 shadow-sm hover:bg-emerald-100 hover:border-emerald-300 hover:text-emerald-700 transition duration-150"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4.5 w-4.5">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                                  </svg>
+                                </button>
+                              )}
+                              <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                {item.status === "active" ? t("actions.deactivate") : t("actions.reactivate")}
+                              </span>
+                            </div>
+                          </div>
                         </td>
                       );
                     })}
@@ -573,11 +637,13 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
             </table>
           </div>
 
-          <div className="mt-2 flex flex-col items-start justify-between gap-3 text-sm text-slate-500 sm:flex-row sm:items-center">
-            <p>{t("table.pageOf", {page: safePage, total: totalPages})}</p>
+          <div className="mt-4 flex flex-col items-start justify-between gap-3 text-sm text-slate-500 sm:flex-row sm:items-center">
+            <p>0 de {visibleModules.length} en seleccion</p>
             <div className="flex items-center gap-2">
-              <button disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} className="rounded-md border border-slate-300 px-3 py-1 text-sm disabled:opacity-50">{t("pagination.previous")}</button>
-              <button disabled={safePage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))} className="rounded-md border border-slate-300 px-3 py-1 text-sm disabled:opacity-50">{t("pagination.next")}</button>
+              <button type="button" onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={safePage <= 1} className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40">{t("pagination.previous")}</button>
+              <span className="rounded-lg bg-blue-600 px-3 py-1 text-white">{safePage}</span>
+              <span>de {totalPages}</span>
+              <button type="button" onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} disabled={safePage >= totalPages} className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40">{t("pagination.next")}</button>
             </div>
           </div>
         </div>
@@ -698,6 +764,41 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
                 <button disabled={saving} onClick={() => void onSubmit()} className="rounded-2xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white disabled:opacity-60">{saving ? t("form.saving") : editingId ? t("form.saveChanges") : t("form.createModule")}</button>
               </div>
           </aside>
+        </div>
+      ) : null}
+
+      {confirmModal.isOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm transition-opacity duration-200" onClick={() => setConfirmModal((prev) => ({...prev, isOpen: false}))} />
+          <div className="relative z-10 w-full max-w-md transform rounded-2xl bg-white p-6 shadow-2xl transition-all duration-200 scale-100 opacity-100 border border-slate-100">
+            <div className="flex flex-col items-center text-center">
+              <div className={`flex h-12 w-12 items-center justify-center rounded-full ${confirmModal.confirmVariant === "danger" ? "bg-rose-50 text-rose-600" : "bg-amber-50 text-amber-600"} mb-4`}>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-6 w-6">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-slate-800">{confirmModal.title}</h3>
+              <p className="mt-2 text-sm text-slate-500 leading-relaxed">{confirmModal.message}</p>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmModal((prev) => ({...prev, isOpen: false}))}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void confirmModal.onConfirm();
+                }}
+                className={`rounded-xl ${confirmModal.confirmVariant === "danger" ? "bg-rose-600 hover:bg-rose-700 text-white" : "bg-amber-500 hover:bg-amber-600 text-slate-900"} px-5 py-2.5 text-sm font-semibold transition shadow-sm`}
+              >
+                {confirmModal.confirmLabel}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </section>

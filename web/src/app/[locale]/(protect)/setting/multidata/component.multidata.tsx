@@ -1,10 +1,18 @@
 "use client";
 
 import {useCallback, useEffect, useMemo, useState} from "react";
+import {useTranslations} from "next-intl";
+
+type Props = {
+  actorId: string;
+  actorRole: "SU" | "Adm" | "user";
+  companyId: string | null;
+};
 
 const DEFAULT_COLUMNS = ["id", "name", "value", "type", "actions"];
 
-export function DataManager() {
+export function DataManager({actorId, actorRole, companyId}: Props) {
+  const t = useTranslations("AccountConfig");
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -15,7 +23,6 @@ export function DataManager() {
   const [rowsPerPage, setRowsPerPage] = useState(5);
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set(DEFAULT_COLUMNS));
-  const [openRowMenu, setOpenRowMenu] = useState<number | null>(null);
   const [openDrawer, setOpenDrawer] = useState(false);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -24,29 +31,68 @@ export function DataManager() {
   const [newType, setNewType] = useState({type: "", typeDescription: "", typeUse: ""});
   const [form, setForm] = useState({Initials_PK: "", name: "", value: "", type: "", typeDescription: "", typeUse: "", language: ""});
 
+  const [sortBy, setSortBy] = useState<string>("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void | Promise<void>;
+    confirmLabel?: string;
+    confirmVariant?: "danger" | "warning";
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {}
+  });
+
+  const showConfirm = (
+    title: string,
+    message: string,
+    onConfirm: () => void | Promise<void>,
+    confirmLabel = "Confirmar",
+    confirmVariant: "danger" | "warning" = "danger"
+  ) => {
+    setConfirmModal({
+      isOpen: true,
+      title,
+      message,
+      onConfirm: async () => {
+        await onConfirm();
+        setConfirmModal((prev) => ({...prev, isOpen: false}));
+      },
+      confirmLabel,
+      confirmVariant
+    });
+  };
+
   const headers = useMemo(
     () => ({
       Authorization: "Bearer local-dev-token",
       "x-oauth-session": "active",
-      "x-actor-id": "multidata-ui",
-      "x-actor-role": "SU",
-      "x-company-id": ""
+      "x-actor-id": actorId,
+      "x-actor-role": actorRole,
+      "x-company-id": companyId ?? ""
     }),
-    []
+    [actorId, actorRole, companyId]
   );
 
   const allColumns = useMemo(
     () => [
-      {key: "id", label: "Id"},
-      {key: "Initials_PK", label: "Iniciales"},
-      {key: "name", label: "Nombre"},
-      {key: "value", label: "Valor"},
-      {key: "type", label: "Categoria"},
-      {key: "typeDescription", label: "Descrip. categoria"},
-      {key: "typeUse", label: "Tipo de uso"},
-      {key: "actions", label: "Acciones"}
+      {key: "id", label: t("table.id")},
+      {key: "Initials_PK", label: t("table.Initials_PK")},
+      {key: "name", label: t("table.name")},
+      {key: "value", label: t("table.value")},
+      {key: "type", label: t("table.type")},
+      {key: "typeDescription", label: t("table.typeDescription")},
+      {key: "typeUse", label: t("table.typeUse")},
+      {key: "created_at", label: t("table.created_at")},
+      {key: "updated_at", label: t("table.updated_at")},
+      {key: "actions", label: t("table.actions")}
     ],
-    []
+    [t]
   );
 
   const load = useCallback(async () => {
@@ -79,7 +125,9 @@ export function DataManager() {
   }, [load]);
 
   useEffect(() => {
-    const closeMenu = () => setOpenRowMenu(null);
+    const closeMenu = () => {
+      setShowColumnsMenu(false);
+    };
     window.addEventListener("click", closeMenu);
     return () => window.removeEventListener("click", closeMenu);
   }, []);
@@ -112,16 +160,32 @@ export function DataManager() {
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return rows.filter((row) => {
+    const filtered = rows.filter((row) => {
       const rowType = String(row?.type || "");
       const rowLanguage = String(row?.language || "");
       if (typeFilter !== "all" && rowType !== typeFilter) return false;
       if (language !== "all" && rowLanguage && rowLanguage !== language) return false;
       if (!term) return true;
-      const text = `${String(row?.id || "")} ${String(row?.Initials_PK || "")} ${String(row?.name || "")} ${String(row?.value || "")} ${rowType}`.toLowerCase();
+      const text = `${String(row?.id || "")} ${String(row?.Initials_PK || "")} ${String(row?.name || "")} ${String(row?.value || "")} ${rowType} ${String(row?.typeDescription || "")} ${String(row?.typeUse || "")}`.toLowerCase();
       return text.includes(term);
     });
-  }, [rows, search, typeFilter, language]);
+
+    const sorted = [...filtered].sort((a, b) => {
+      let left = a[sortBy];
+      let right = b[sortBy];
+
+      if (left === null || left === undefined) left = "";
+      if (right === null || right === undefined) right = "";
+
+      const leftStr = String(left).toLowerCase();
+      const rightStr = String(right).toLowerCase();
+      if (leftStr === rightStr) return 0;
+      const comparison = leftStr > rightStr ? 1 : -1;
+      return sortDir === "asc" ? comparison : -comparison;
+    });
+
+    return sorted;
+  }, [rows, search, typeFilter, language, sortBy, sortDir]);
 
   const pages = Math.max(1, Math.ceil(filteredRows.length / rowsPerPage));
   const safePage = Math.min(page, pages);
@@ -227,21 +291,27 @@ export function DataManager() {
   };
 
   const deleteItem = async (valueId: any) => {
-    const ok = window.confirm("¿Eliminar este registro?");
-    if (!ok) return;
-    setError("");
-    try {
-      const response = await fetch("/api/v1/db/st_multidata", {
-        method: "DELETE",
-        headers: {...headers, "content-type": "application/json"},
-        body: JSON.stringify({id: String(valueId || "")})
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body?.message || "No se pudo eliminar");
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo eliminar");
-    }
+    showConfirm(
+      "¿Eliminar este registro?",
+      "Esta acción es irreversible y removerá el registro del catálogo auxiliar. ¿Deseas continuar?",
+      async () => {
+        setError("");
+        try {
+          const response = await fetch("/api/v1/db/st_multidata", {
+            method: "DELETE",
+            headers: {...headers, "content-type": "application/json"},
+            body: JSON.stringify({id: String(valueId || "")})
+          });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body?.message || "No se pudo eliminar");
+          await load();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "No se pudo eliminar");
+        }
+      },
+      "Eliminar",
+      "danger"
+    );
   };
 
   const toggleColumn = (columnKey: string) => {
@@ -255,6 +325,15 @@ export function DataManager() {
       }
       return next;
     });
+  };
+
+  const setSort = (column: string) => {
+    if (sortBy === column) {
+      setSortDir((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortBy(column);
+    setSortDir("asc");
   };
 
   return (
@@ -332,7 +411,13 @@ export function DataManager() {
               <thead className="bg-slate-100 text-left text-slate-500">
                 <tr>
                   {headerColumns.map((column) => (
-                    <th key={column.key} className="px-4 py-3 font-medium">{column.label}</th>
+                    <th key={column.key} className={`px-4 py-3 ${column.key === "actions" ? "text-center" : ""}`}>
+                      {column.key !== "actions" ? (
+                        <button className="font-medium" onClick={() => setSort(column.key)}>{column.label}</button>
+                      ) : (
+                        column.label
+                      )}
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -341,25 +426,45 @@ export function DataManager() {
                   <tr key={`${row?.id || row?.value || "row"}-${index}`} className="border-t border-slate-100">
                     {headerColumns.map((column) => {
                       if (column.key === "id") return <td key={`id-${index}`} className="px-4 py-3">{row?.id ?? (safePage - 1) * rowsPerPage + index + 1}</td>;
+                      if (column.key === "created_at") return <td key={`created-${index}`} className="px-4 py-3">{row?.created_at ? new Date(row.created_at).toLocaleString() : "-"}</td>;
+                      if (column.key === "updated_at") return <td key={`updated-${index}`} className="px-4 py-3">{row?.updated_at ? new Date(row.updated_at).toLocaleString() : "-"}</td>;
                       if (column.key === "actions") {
                         return (
-                          <td key={`actions-${index}`} className="relative px-4 py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setOpenRowMenu((prev) => (prev === index ? null : index));
-                              }}
-                              className="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100"
-                            >
-                              ⋮
-                            </button>
-                            {openRowMenu === index ? (
-                              <div className="absolute right-4 z-10 mt-1 w-28 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
-                                <button type="button" onClick={() => openEditDrawer(row)} className="block w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-slate-50">Editar</button>
-                                <button type="button" onClick={() => deleteItem(row?.value)} className="block w-full rounded-md px-2 py-1.5 text-left text-xs text-rose-700 hover:bg-rose-50">Eliminar</button>
+                          <td key={`actions-${index}`} className="px-4 py-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              {/* Editar (Lápiz Azul) */}
+                              <div className="group relative">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditDrawer(row)}
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 shadow-sm hover:bg-blue-100 hover:border-blue-300 hover:text-blue-700 transition duration-150"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" className="h-4.5 w-4.5">
+                                    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                                    <path d="m15 5 4 4" />
+                                  </svg>
+                                </button>
+                                <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                  {t("actions.edit")}
+                                </span>
                               </div>
-                            ) : null}
+
+                              {/* Eliminar (Basura Roja) */}
+                              <div className="group relative">
+                                <button
+                                  type="button"
+                                  onClick={() => void deleteItem(row?.value)}
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 shadow-sm hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 transition duration-150"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4.5 w-4.5">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                                  </svg>
+                                </button>
+                                <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                  Eliminar
+                                </span>
+                              </div>
+                            </div>
                           </td>
                         );
                       }
@@ -379,10 +484,10 @@ export function DataManager() {
           <div className="mt-4 flex flex-col items-start justify-between gap-3 text-sm text-slate-500 sm:flex-row sm:items-center">
             <p>0 de {filteredRows.length} en seleccion</p>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={safePage <= 1} className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40">previo</button>
+              <button type="button" onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={safePage <= 1} className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40">{t("pagination.previous")}</button>
               <span className="rounded-lg bg-blue-600 px-3 py-1 text-white">{safePage}</span>
               <span>de {pages}</span>
-              <button type="button" onClick={() => setPage((prev) => Math.min(pages, prev + 1))} disabled={safePage >= pages} className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40">siguiente</button>
+              <button type="button" onClick={() => setPage((prev) => Math.min(pages, prev + 1))} disabled={safePage >= pages} className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40">{t("pagination.next")}</button>
             </div>
           </div>
         </>
@@ -394,8 +499,8 @@ export function DataManager() {
           <aside className={`absolute right-0 top-0 h-full w-full max-w-[560px] bg-white p-5 shadow-2xl transition-transform duration-200 ease-out ${drawerVisible ? "translate-x-0" : "translate-x-full"}`}>
             <div className="flex items-start justify-between">
               <div>
-                <h2 className="text-3xl font-semibold">Agregar Item</h2>
-                <p className="mt-1 text-sm text-slate-500">Make changes to the user profile here. Click save when you are done.</p>
+                <h2 className="text-3xl font-semibold">{actionMode === "edit" ? "Editar Item" : "Agregar Item"}</h2>
+                <p className="mt-1 text-sm text-slate-500">Realiza cambios en el registro y presiona Guardar.</p>
               </div>
               <button type="button" onClick={closeDrawer} className="text-2xl text-slate-400 hover:text-slate-600">×</button>
             </div>
@@ -518,8 +623,44 @@ export function DataManager() {
           </aside>
         </div>
       ) : null}
+
+      {confirmModal.isOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm transition-opacity duration-200" onClick={() => setConfirmModal((prev) => ({...prev, isOpen: false}))} />
+          <div className="relative z-10 w-full max-w-md transform rounded-2xl bg-white p-6 shadow-2xl transition-all duration-200 scale-100 opacity-100 border border-slate-100">
+            <div className="flex flex-col items-center text-center">
+              <div className={`flex h-12 w-12 items-center justify-center rounded-full ${confirmModal.confirmVariant === "danger" ? "bg-rose-50 text-rose-600" : "bg-amber-50 text-amber-600"} mb-4`}>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-6 w-6">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-slate-800">{confirmModal.title}</h3>
+              <p className="mt-2 text-sm text-slate-500 leading-relaxed">{confirmModal.message}</p>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmModal((prev) => ({...prev, isOpen: false}))}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void confirmModal.onConfirm();
+                }}
+                className={`rounded-xl ${confirmModal.confirmVariant === "danger" ? "bg-rose-600 hover:bg-rose-700 text-white" : "bg-amber-500 hover:bg-amber-600 text-slate-900"} px-5 py-2.5 text-sm font-semibold transition shadow-sm`}
+              >
+                {confirmModal.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
 
 export default DataManager;
+
