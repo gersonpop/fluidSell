@@ -3,8 +3,10 @@
 # dependencies
 /web/node_modules
 /web/.pnp
+/web/scratch
 
 /node_modules
+/scratch
 /.pnp
 .pnp.*
 .yarn/*

@@ -18,6 +18,7 @@ type ModuleItem = {
   scope_id: string;
   content?: string | null;
   updated_at?: string | null;
+  destination?: string | null;
 };
 
 type ScopeItem = {id: string; value?: string; name?: string};
@@ -67,7 +68,8 @@ const defaultForm = {
   status: "",
   parent: "/",
   scope_id: "",
-  content: "newPage"
+  content: "newPage",
+  destination: ""
 };
 
 export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
@@ -77,6 +79,7 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
   const [scopes, setScopes] = useState<ScopeItem[]>([]);
   const [statuses, setStatuses] = useState<StatusItem[]>([]);
   const [pageContents, setPageContents] = useState<PageContentItem[]>([]);
+  const [destinations, setDestinations] = useState<{value: string; label: string}[]>([]);
   const [form, setForm] = useState(defaultForm);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
@@ -179,6 +182,18 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
         .filter((item) => item.value.length > 0);
       const dedupPageContent = Array.from(new Map(pageContentOptions.map((item) => [item.value.toLowerCase(), item])).values());
       setPageContents(dedupPageContent);
+      
+      // Load modulesDest catalog options
+      const destinationOptions = rawScopes
+        .filter((item) => String(item.type ?? "").toLowerCase() === "modulesdest")
+        .map((item) => ({
+          value: String(item.value ?? "").trim(),
+          label: String(item.name ?? item.value ?? "").trim()
+        }))
+        .filter((item) => item.value.length > 0);
+      const dedupDestinations = Array.from(new Map(destinationOptions.map((item) => [item.value.toLowerCase(), item])).values());
+      setDestinations(dedupDestinations);
+
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : t("errors.load"));
@@ -317,7 +332,8 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
       status: item.status,
       parent: item.parent ?? "/",
       scope_id: item.scope_id,
-      content: item.content ?? "newPage"
+      content: item.content ?? "newPage",
+      destination: item.destination ?? ""
     });
     setIconPreview(item.icon ?? null);
     setFormErrors({});
@@ -361,7 +377,8 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
         parent: form.parent,
         description: form.description || null,
         route: form.route || null,
-        icon: form.icon || null
+        icon: form.icon || null,
+        destination: form.destination || null
       };
       if (!editingId) {
         delete (payload as {code?: string}).code;
@@ -697,14 +714,25 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
                   <input value={form.sort_order} onChange={(e) => setForm((s) => ({...s, sort_order: e.target.value}))} placeholder={t("form.order")} className="w-full rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm" />
                   {formErrors.sort_order ? <p className="mt-1 text-xs text-rose-600">{formErrors.sort_order}</p> : null}
                 </div>
-                <div>
-                  <label className="mb-1 block text-xs text-slate-500">{t("form.status")}</label>
-                  <select value={form.status} onChange={(e) => setForm((s) => ({...s, status: e.target.value}))} className="w-full rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm">
-                    {statuses.map((status) => (
-                      <option key={status.value} value={status.value}>{status.label}</option>
-                    ))}
-                  </select>
-                  {formErrors.status ? <p className="mt-1 text-xs text-rose-600">{formErrors.status}</p> : null}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-500">{t("form.status")}</label>
+                    <select value={form.status} onChange={(e) => setForm((s) => ({...s, status: e.target.value}))} className="w-full rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm">
+                      {statuses.map((status) => (
+                        <option key={status.value} value={status.value}>{status.label}</option>
+                      ))}
+                    </select>
+                    {formErrors.status ? <p className="mt-1 text-xs text-rose-600">{formErrors.status}</p> : null}
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-500">Destination</label>
+                    <select value={form.destination} onChange={(e) => setForm((s) => ({...s, destination: e.target.value}))} className="w-full rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm">
+                      <option value="">Ninguno</option>
+                      {destinations.map((dest) => (
+                        <option key={dest.value} value={dest.value}>{dest.label}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-slate-500">{t("form.scope")}</label>

@@ -212,24 +212,25 @@ model UserRole {
 }
 
 model Module {
-  id          String   @id @default(cuid())
-  key         String   @unique
-  name        String
-  scope       RoleScope
-  route       String?
-  icon        String?
-  content     String?
-  pageContent String?  @map("page_content")
-  category    String?
-  parentId    String   @default("/")
-  isMenu      Boolean  @default(true)
-  isActive    Boolean  @default(true)
-  description String?
+  id           String   @id @default(dbgenerated("substr(md5((random()::text || clock_timestamp()::text)), 1, 24)"))
+  code         String   @unique @db.VarChar(80)
+  name         String   @db.VarChar(140)
+  description  String?
+  route        String?  @db.VarChar(255)
+  icon         String?
+  sort_order   Decimal  @default(100) @db.Decimal(10, 2)
+  status       String   @default("active") @db.VarChar(20)
+  parent       String   @default("/")
+  scope_id     String
+  created_at   DateTime @default(now()) @db.Timestamptz
+  updated_at   DateTime @default(now()) @updatedAt @db.Timestamptz
+  content      String?  @db.VarChar(40)
+  page_content String?
+  destination  String?  @db.VarChar(255)
 
   permissions RolePermission[]
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  @@map("Modules")
 }
 
 model RolePermission {

@@ -1,3 +1,15 @@
+CREATE TABLE IF NOT EXISTS public."st_Multidata" (
+  "Initials_PK" VARCHAR(50) NOT NULL,
+  name VARCHAR(140) NOT NULL,
+  value VARCHAR(255) NOT NULL,
+  type VARCHAR(100) NOT NULL,
+  "typeDescription" TEXT NULL,
+  "typeUse" VARCHAR(100) NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (value, type)
+);
+
 INSERT INTO public."st_Multidata" (
   "Initials_PK",
   "name",

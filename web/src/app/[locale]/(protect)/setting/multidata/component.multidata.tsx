@@ -30,6 +30,7 @@ export function DataManager({actorId, actorRole, companyId}: Props) {
   const [selectedRow, setSelectedRow] = useState<any>(null);
   const [newType, setNewType] = useState({type: "", typeDescription: "", typeUse: ""});
   const [form, setForm] = useState({Initials_PK: "", name: "", value: "", type: "", typeDescription: "", typeUse: "", language: ""});
+  const [localCategories, setLocalCategories] = useState<any[]>([]);
 
   const [sortBy, setSortBy] = useState<string>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -155,8 +156,15 @@ export function DataManager({actorId, actorRole, companyId}: Props) {
         });
       }
     });
+    localCategories.forEach((item) => {
+      const type = String(item?.type || "").trim();
+      if (!type) return;
+      if (!map.has(type)) {
+        map.set(type, item);
+      }
+    });
     return Array.from(map.values()).sort((a, b) => a.type.localeCompare(b.type));
-  }, [rows]);
+  }, [rows, localCategories]);
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -211,6 +219,7 @@ export function DataManager({actorId, actorRole, companyId}: Props) {
     setSelectedRow(null);
     setNewType({type: "", typeDescription: "", typeUse: ""});
     setForm({Initials_PK: "", name: "", value: "", type: "", typeDescription: "", typeUse: "", language: language === "all" ? String(languageOptions[0]?.value || "") : language});
+    setLocalCategories([]);
     setOpenDrawer(true);
     window.setTimeout(() => setDrawerVisible(true), 10);
   };
@@ -232,6 +241,7 @@ export function DataManager({actorId, actorRole, companyId}: Props) {
       typeUse: String(row?.typeUse || ""),
       language: String(row?.language || "")
     });
+    setLocalCategories([]);
     setOpenDrawer(true);
     window.setTimeout(() => setDrawerVisible(true), 10);
   };
@@ -247,11 +257,22 @@ export function DataManager({actorId, actorRole, companyId}: Props) {
       return;
     }
     setError("");
-    setForm((prev) => ({
-      ...prev,
+    const addedCat = {
       type: newType.type.trim(),
       typeDescription: newType.typeDescription.trim(),
       typeUse: newType.typeUse.trim()
+    };
+    setLocalCategories((prev) => {
+      const exists = prev.some((cat) => cat.type === addedCat.type) ||
+                     categoryOptions.some((cat) => cat.type === addedCat.type);
+      if (exists) return prev;
+      return [...prev, addedCat];
+    });
+    setForm((prev) => ({
+      ...prev,
+      type: addedCat.type,
+      typeDescription: addedCat.typeDescription,
+      typeUse: addedCat.typeUse
     }));
   };
 

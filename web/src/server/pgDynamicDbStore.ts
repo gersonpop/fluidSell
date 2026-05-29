@@ -1,8 +1,8 @@
-import {getPgPool} from "@/server/postgres";
-import {access, mkdir, writeFile} from "node:fs/promises";
-import {constants as fsConstants} from "node:fs";
-import {join} from "node:path";
-import {invalidateCatalogCache} from "@/server/auth/onboarding";
+import { getPgPool } from "@/server/postgres";
+import { access, mkdir, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { join } from "node:path";
+import { invalidateCatalogCache } from "@/server/auth/onboarding";
 
 // Store in-memory cache for static tables
 type StaticCacheEntry = {
@@ -38,7 +38,7 @@ export type ActorContext = {
 };
 
 const TABLE_MAP = {
-  modules: 'public.modules',
+  modules: 'public.\"Modules\"',
   users: 'public."PlatformUser"',
   oauth_sessions: 'public.oauth_sessions',
   roles: 'public."Role"',
@@ -47,7 +47,8 @@ const TABLE_MAP = {
   st_multidata: 'public."st_Multidata"',
   st_country: 'public."st_Country"',
   st_state: 'public."st_State"',
-  st_city: 'public."st_City"'
+  st_city: 'public."st_City"',
+  companies: 'public."Company"'
 } as const;
 
 type DynamicTableName = keyof typeof TABLE_MAP;
@@ -85,7 +86,7 @@ function isCorsOriginAllowed(origin: string | null) {
 async function resolveCatalogStatus(value: unknown) {
   const text = String(value ?? "").trim();
   if (!text) throw new Error("status is required");
-  const result = await getPgPool().query<{value: string}>(
+  const result = await getPgPool().query<{ value: string }>(
     'select "value" from public."st_Multidata" where lower("value")=lower($1) and lower(coalesce("type",\'\'))=\'modulestatus\' limit 1',
     [text]
   );
@@ -96,7 +97,7 @@ async function resolveCatalogStatus(value: unknown) {
 async function resolvePageContent(value: unknown) {
   const text = String(value ?? "").trim();
   if (!text) throw new Error("content is required");
-  const result = await getPgPool().query<{value: string}>(
+  const result = await getPgPool().query<{ value: string }>(
     'select "value" from public."st_Multidata" where lower("value")=lower($1) and lower(coalesce("type",\'\'))=\'pagecontent\' limit 1',
     [text]
   );
@@ -116,7 +117,7 @@ function normalizePageContentKind(value: string) {
 }
 
 async function validateRoleScope(scopeId: string) {
-  const result = await getPgPool().query<{type: string | null; typeUse: string | null; value: string | null; name: string | null}>(
+  const result = await getPgPool().query<{ type: string | null; typeUse: string | null; value: string | null; name: string | null }>(
     'select "type", "typeUse", "value", "name" from public."st_Multidata" where lower("Initials_PK")=lower($1) limit 1',
     [scopeId]
   );
@@ -131,13 +132,13 @@ async function validateModuleParent(parent: string | null) {
     throw new Error("parent is required. Use '/' for root");
   }
   if (parent === "/") return;
-  const result = await getPgPool().query("select id from public.modules where id=$1 limit 1", [parent]);
+  const result = await getPgPool().query("select id from public.\"Modules\" where id=$1 limit 1", [parent]);
   if ((result.rowCount ?? 0) === 0) throw new Error("parent module not found");
 }
 
 async function generateModuleCode(name: string) {
   const seed = name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 24) || "MODULE";
-  const existing = await getPgPool().query<{code: string}>("select code from public.modules where code like $1", [`${seed}%`]);
+  const existing = await getPgPool().query<{ code: string }>("select code from public.\"Modules\" where code like $1", [`${seed}%`]);
   if ((existing.rowCount ?? 0) === 0) return seed;
   const used = new Set(existing.rows.map((row) => row.code));
   let i = 2;
@@ -166,7 +167,7 @@ async function resolveParentAwareRoute(route: string | null, parentId: string | 
     return `/${currentSegments.join("/")}`;
   }
 
-  const parentResult = await getPgPool().query<{route: string | null}>("select route from public.modules where id=$1 limit 1", [parentId]);
+  const parentResult = await getPgPool().query<{ route: string | null }>("select route from public.\"Modules\" where id=$1 limit 1", [parentId]);
   if ((parentResult.rowCount ?? 0) === 0) {
     throw new Error("parent module not found");
   }
@@ -198,7 +199,7 @@ async function ensureModuleRouteScaffold(route: string | null, pageContent: stri
   if (!segments) return;
   const routeDir = join(process.cwd(), "src", "app", "[locale]", "(protect)", ...segments);
 
-  await mkdir(routeDir, {recursive: true});
+  await mkdir(routeDir, { recursive: true });
   const pageTitle = getLeafTitle(segments);
   const normalized = normalizePageContentKind(pageContent);
   const baseName = segments[segments.length - 1].toLowerCase();
@@ -383,7 +384,11 @@ export default async function DynamicNewPage({params}: PageProps) {
   );
 }`;
     } else {
-      pageTemplate = `import {NewPagePattern} from "@/components/module-patterns/NewPagePattern";
+      pageTemplate = `import {getServerSession} from "next-auth";
+import {redirect} from "next/navigation";
+import {authOptions} from "@/lib/auth-options";
+import {listRecords, type ActorContext} from "@/server/pgDynamicDbStore";
+import {NewPagePattern} from "@/components/module-patterns/NewPagePattern";
 import DynamicComponent from "./component.${baseName}";
 
 type PageProps = {
@@ -391,10 +396,26 @@ type PageProps = {
 };
 
 export default async function DynamicNewPage({params}: PageProps) {
+  const {locale} = await params;
+  const session = await getServerSession(authOptions);
+  if (!session?.user) redirect("/" + locale);
+
+  const rawRole = String((session.user as {role?: string}).role ?? "SU").trim().toLowerCase();
+  const role: "SU" | "cliente" = rawRole === "su" ? "SU" : "cliente";
+  const actor: ActorContext = {
+    actorId: session.user.email ?? session.user.name ?? "anonymous",
+    role,
+    companyId: (session.user as {companyId?: string | null}).companyId ?? null
+  };
+
+  const rows = (await listRecords(actor, "modules", null)) as Array<Record<string, any>>;
+  const currentRoute = "${route}";
+  const currentModule = rows.find(m => m.route === currentRoute && m.status === "active");
+
   return (
     <NewPagePattern
-      title="${pageTitle}"
-      description="${pageTitle}"
+      title={currentModule?.name ?? "${pageTitle}"}
+      description={currentModule?.description ?? ""}
     >
       <DynamicComponent />
     </NewPagePattern>
@@ -438,13 +459,14 @@ async function createModuleRecord(actor: ActorContext, payload: Record<string, u
   const status = await resolveCatalogStatus(payload.status);
   const pageContent = await resolvePageContent(resolveIncomingContent(payload));
   const parent = payload.parent !== undefined ? String(payload.parent).trim() : "";
+  const destination = payload.destination ? String(payload.destination).trim() : null;
   await validateRoleScope(scopeId);
   await validateModuleParent(parent);
   const effectiveRoute = await resolveParentAwareRoute(payload.route ? String(payload.route) : null, parent);
   const code = await generateModuleCode(name);
   const result = await getPgPool().query(
-    "insert into public.modules (code,name,description,route,icon,sort_order,status,parent,scope_id,content) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *",
-    [code, name, payload.description ? String(payload.description) : null, effectiveRoute, payload.icon ? String(payload.icon) : null, sortOrder, status, parent, scopeId, pageContent]
+    "insert into public.\"Modules\" (code,name,description,route,icon,sort_order,status,parent,scope_id,content,destination) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *",
+    [code, name, payload.description ? String(payload.description) : null, effectiveRoute, payload.icon ? String(payload.icon) : null, sortOrder, status, parent, scopeId, pageContent, destination]
   );
   await ensureModuleRouteScaffold(effectiveRoute, pageContent);
   return result.rows[0];
@@ -452,7 +474,7 @@ async function createModuleRecord(actor: ActorContext, payload: Record<string, u
 
 async function updateModuleRecord(actor: ActorContext, id: string, patch: Record<string, unknown>) {
   ensureSu(actor);
-  const current = await getPgPool().query<Record<string, unknown>>("select * from public.modules where id=$1 limit 1", [id]);
+  const current = await getPgPool().query<Record<string, unknown>>("select * from public.\"Modules\" where id=$1 limit 1", [id]);
   if ((current.rowCount ?? 0) === 0) throw new Error("Record not found");
   if (patch.code && String(patch.code).trim().toUpperCase() !== String(current.rows[0].code ?? "")) throw new Error("code is immutable");
   const next = {
@@ -467,15 +489,16 @@ async function updateModuleRecord(actor: ActorContext, id: string, patch: Record
         ? await resolvePageContent(resolveIncomingContent(patch))
         : await resolvePageContent(current.rows[0].content ?? "newPage"),
     parent: patch.parent !== undefined ? String(patch.parent).trim() : String(current.rows[0].parent ?? "/"),
-    scope_id: patch.scope_id !== undefined ? String(patch.scope_id) : String(current.rows[0].scope_id ?? "")
+    scope_id: patch.scope_id !== undefined ? String(patch.scope_id) : String(current.rows[0].scope_id ?? ""),
+    destination: patch.destination !== undefined ? (patch.destination ? String(patch.destination).trim() : null) : (current.rows[0].destination as string | null)
   };
   if (!Number.isFinite(next.sort_order)) throw new Error("sort_order must be numeric");
   await validateRoleScope(next.scope_id);
   await validateModuleParent(next.parent);
   const effectiveRoute = await resolveParentAwareRoute(next.route, next.parent);
   const updated = await getPgPool().query(
-    "update public.modules set name=$1, description=$2, route=$3, icon=$4, sort_order=$5, status=$6, parent=$7, scope_id=$8, content=$9, updated_at=now() where id=$10 returning *",
-    [next.name, next.description, effectiveRoute, next.icon, next.sort_order, next.status, next.parent, next.scope_id, next.content, id]
+    "update public.\"Modules\" set name=$1, description=$2, route=$3, icon=$4, sort_order=$5, status=$6, parent=$7, scope_id=$8, content=$9, destination=$10, updated_at=now() where id=$11 returning *",
+    [next.name, next.description, effectiveRoute, next.icon, next.sort_order, next.status, next.parent, next.scope_id, next.content, next.destination, id]
   );
   await ensureModuleRouteScaffold(effectiveRoute, next.content);
   return updated.rows[0];
@@ -484,7 +507,7 @@ async function updateModuleRecord(actor: ActorContext, id: string, patch: Record
 async function softDeleteModuleRecord(actor: ActorContext, id: string) {
   ensureSu(actor);
   const inactive = await resolveCatalogStatus("inactive");
-  const updated = await getPgPool().query("update public.modules set status=$1, updated_at=now() where id=$2 returning *", [inactive, id]);
+  const updated = await getPgPool().query("update public.\"Modules\" set status=$1, updated_at=now() where id=$2 returning *", [inactive, id]);
   if ((updated.rowCount ?? 0) === 0) throw new Error("Record not found");
 }
 
@@ -559,14 +582,14 @@ async function appendAuditDeny(actor: ActorContext, table: string, reason: strin
 }
 
 export async function listActiveModulesForRole(role: ActorScope) {
-  const rows = await getPgPool().query<{id: string; code: string; name: string; route: string | null; icon: string | null; scope_value: string | null; scope_name: string | null}>(
-    'select m.id, m.code, m.name, m.route, m.icon, lower(coalesce(s."value",\'\')) as scope_value, lower(coalesce(s."name",\'\')) as scope_name from public.modules m join public."st_Multidata" s on lower(s."Initials_PK") = lower(m.scope_id) where lower(m.status)=\'active\' order by m.sort_order asc, m.name asc'
+  const rows = await getPgPool().query<{ id: string; code: string; name: string; route: string | null; icon: string | null; scope_value: string | null; scope_name: string | null }>(
+    'select m.id, m.code, m.name, m.route, m.icon, lower(coalesce(s."value",\'\')) as scope_value, lower(coalesce(s."name",\'\')) as scope_name from public.\"Modules\" m join public."st_Multidata" s on lower(s."Initials_PK") = lower(m.scope_id) where lower(m.status)=\'active\' order by m.sort_order asc, m.name asc'
   );
   return rows.rows.filter((row) => {
     const marker = `${row.scope_value ?? ""} ${row.scope_name ?? ""}`;
     if (marker.includes("su") && !marker.includes("client")) return role === "SU";
     return true;
-  }).map((row) => ({id: row.id, code: row.code, name: row.name, route: row.route, icon: row.icon}));
+  }).map((row) => ({ id: row.id, code: row.code, name: row.name, route: row.route, icon: row.icon }));
 }
 
 const PK_MAP = {
@@ -579,7 +602,8 @@ const PK_MAP = {
   st_multidata: 'value',
   st_country: 'iso',
   st_state: 'id_state',
-  st_city: 'id_city'
+  st_city: 'id_city',
+  companies: 'id'
 } as const;
 
 async function createPlatformUserRecord(actor: ActorContext, payload: Record<string, unknown>) {
@@ -593,12 +617,12 @@ async function createPlatformUserRecord(actor: ActorContext, payload: Record<str
   const countryIso = String(payload.country_iso || "CO").trim();
   const status = String(payload.status || "active").trim();
   const provider = String(payload.provider || "google").trim();
-  
+
   if (!email || !name) throw new Error("user_email and name are required");
-  
+
   const id = `USR-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
   const username = email;
-  
+
   const result = await getPgPool().query(
     `INSERT INTO public."PlatformUser" (
       id_user_pk, user_email, username, name, last_name, phone_number, "companyId", 
@@ -664,16 +688,16 @@ async function createRoleRecord(actor: ActorContext, payload: Record<string, unk
   const description = String(payload.description || "").trim();
   const scope = String(payload.scope || "user").trim();
   const companyId = actor.role !== "SU" ? actor.companyId : String(payload.company_id || payload.companyId || "900000000").trim();
-  
+
   if (!name || !key) throw new Error("name and key_id are required");
-  
+
   const id = `ROL-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-  
+
   await getPgPool().query(
     'insert into public."Role" (id, "companyId", name, key, description, scope, "createdAt", "updatedAt") values ($1, $2, $3, $4, $5, $6, now(), now())',
     [id, companyId, name, key, description, scope]
   );
-  
+
   return {
     id,
     key_id: key,
@@ -690,7 +714,7 @@ async function updateRoleRecord(actor: ActorContext, id: string, patch: Record<s
   const name = patch.name !== undefined ? String(patch.name).trim() : null;
   const description = patch.description !== undefined ? String(patch.description).trim() : null;
   const scope = patch.scope !== undefined ? String(patch.scope).trim() : null;
-  
+
   const updates: string[] = [];
   const values: any[] = [];
   let idx = 1;
@@ -706,7 +730,7 @@ async function updateRoleRecord(actor: ActorContext, id: string, patch: Record<s
     updates.push(`scope=$${idx++}`);
     values.push(scope);
   }
-  
+
   if (updates.length > 0) {
     values.push(id);
     await getPgPool().query(
@@ -714,7 +738,7 @@ async function updateRoleRecord(actor: ActorContext, id: string, patch: Record<s
       values
     );
   }
-  
+
   const permissions = patch.permissions as Record<string, any> | undefined;
   if (permissions) {
     for (const [moduleId, perm] of Object.entries(permissions)) {
@@ -723,12 +747,12 @@ async function updateRoleRecord(actor: ActorContext, id: string, patch: Record<s
       const canUpdate = !!perm.update;
       const canDelete = !!perm.delete;
       const actions = perm.microroles || {};
-      
+
       const existing = await getPgPool().query(
         'select id from public."RolePermission" where "roleId"=$1 and "moduleId"=$2',
         [id, moduleId]
       );
-      
+
       if (existing.rows.length > 0) {
         await getPgPool().query(
           'update public."RolePermission" set "canRead"=$1, "canCreate"=$2, "canUpdate"=$3, "canDelete"=$4, actions=$5 where id=$6',
@@ -743,7 +767,7 @@ async function updateRoleRecord(actor: ActorContext, id: string, patch: Record<s
       }
     }
   }
-  
+
   return { id, ok: true };
 }
 
@@ -788,11 +812,11 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
     }
     query += ' order by name asc';
     const roleRows = await getPgPool().query(query, values);
-    
+
     const rolesList = [];
     for (const r of roleRows.rows) {
       const permRows = await getPgPool().query('select * from public."RolePermission" where "roleId"=$1', [r.id]);
-      
+
       const permissionsMap: Record<string, any> = {};
       for (const p of permRows.rows) {
         permissionsMap[p.moduleId] = {
@@ -803,7 +827,7 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
           microroles: p.actions || {}
         };
       }
-      
+
       rolesList.push({
         id: r.id,
         key_id: r.key,
@@ -820,10 +844,10 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
 
   if (table === "modules") {
     if (id) {
-      const one = await getPgPool().query("select * from public.modules where id=$1", [id]);
+      const one = await getPgPool().query("select * from public.\"Modules\" where id=$1", [id]);
       return one.rows;
     }
-    const all = await getPgPool().query("select * from public.modules order by sort_order asc, name asc");
+    const all = await getPgPool().query("select * from public.\"Modules\" order by sort_order asc, name asc");
     staticStoreCache["modules"] = {
       data: all.rows,
       expiresAt: Date.now() + STATIC_CACHE_TTL_MS
@@ -920,7 +944,7 @@ export async function deleteRecord(actor: ActorContext, tableParam: string, id: 
   throw new Error(`Delete is not enabled for table '${table}'`);
 }
 
-export {isCorsOriginAllowed};
+export { isCorsOriginAllowed };
 
 export async function auditDenied(actor: ActorContext, table: string, reason: string) {
   await appendAuditDeny(actor, table, reason);
