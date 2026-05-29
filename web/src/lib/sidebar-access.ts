@@ -8,6 +8,7 @@ export type DynamicModuleNav = {
   status: string;
   pageContent: string | null;
   sortOrder: number;
+  badge?: string;
 };
 
 export type DbModuleRecord = Record<string, unknown>;
@@ -35,23 +36,27 @@ export function selectSidebarModulesFromDbRows(rows: DbModuleRecord[]) {
       icon: toText(row.icon),
       parent: toText(row.parent ?? row.parentId),
       status: toText(row.status).toLowerCase(),
-      pageContent: toText(row.page_content || row.pageContent || "") || null,
+      pageContent: toText(row.page_content || row.pageContent || row.content || "") || null,
       sortOrder: toSortNumber(row.sort_order ?? row.sortOrder ?? row.order)
-    }))
-    .filter((item) => item.status === "active");
+    }));
 
-  return normalized
-    .filter((item) => item.parent === "/")
+  const activeNormalized = normalized.filter((item) => item.status === "active");
+
+  const sections = activeNormalized.filter((item) => item.pageContent === "section");
+  const sectionIds = new Set(sections.map((item) => item.id));
+
+  return activeNormalized
+    .filter((item) => item.parent === "/" || sectionIds.has(item.parent))
     .sort((a, b) => {
       if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
       return a.name.localeCompare(b.name);
     })
-    .filter((item) => item.name.length > 0 && item.route.length > 0)
+    .filter((item) => item.name.length > 0 && (item.route.length > 0 || item.pageContent === "section"))
     .map<DynamicModuleNav>((item) => ({
       id: item.id,
       code: item.code,
       name: item.name,
-      route: item.route,
+      route: item.route.length > 0 ? item.route : null,
       icon: item.icon.length > 0 ? item.icon : null,
       parent: item.parent,
       status: item.status,

@@ -40,7 +40,7 @@ export default async function DynamicEmbeddedLayout({params, children}: LayoutPr
       icon: String(row.icon || "") || null,
       parent: String(row.parent),
       status: String(row.status),
-      pageContent: String(row.page_content || row.pageContent || ""),
+      pageContent: String(row.page_content || row.pageContent || row.content || ""),
       sortOrder: Number(row.sort_order ?? row.sortOrder ?? 100)
     }))
     .sort((a, b) => a.sortOrder - b.sortOrder);

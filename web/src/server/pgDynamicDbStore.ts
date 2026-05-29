@@ -113,6 +113,7 @@ function normalizePageContentKind(value: string) {
   const v = value.trim().toLowerCase();
   if (v === "newpage" || v === "nueva pagina" || v === "nuevapagina") return "newpage";
   if (v === "embedded" || v === "embebido") return "embedded";
+  if (v === "section" || v === "seccion" || v === "sección") return "section";
   return v;
 }
 
@@ -195,13 +196,16 @@ function getLeafTitle(segments: string[]) {
 }
 
 async function ensureModuleRouteScaffold(route: string | null, pageContent: string) {
+  const normalized = normalizePageContentKind(pageContent);
+  if (normalized === "section") {
+    return; // Avoid creating folders or layout/page files for category separators
+  }
   const segments = normalizeModuleRoutePath(route);
   if (!segments) return;
   const routeDir = join(process.cwd(), "src", "app", "[locale]", "(protect)", ...segments);
 
   await mkdir(routeDir, { recursive: true });
   const pageTitle = getLeafTitle(segments);
-  const normalized = normalizePageContentKind(pageContent);
   const baseName = segments[segments.length - 1].toLowerCase();
 
   if (normalized === "embedded") {
@@ -250,7 +254,7 @@ export default async function DynamicEmbeddedLayout({params, children}: LayoutPr
       icon: String(row.icon || "") || null,
       parent: String(row.parent),
       status: String(row.status),
-      pageContent: String(row.page_content || row.pageContent || ""),
+      pageContent: String(row.page_content || row.pageContent || row.content || ""),
       sortOrder: Number(row.sort_order ?? row.sortOrder ?? 100)
     }))
     .sort((a, b) => a.sortOrder - b.sortOrder);

@@ -68,17 +68,27 @@ export function ProtectedSidebarLayout({
     return "w-[72px]";
   }, [expanded]);
 
-  const navItems = useMemo(
-    () =>
-      dynamicModules.map((item) => ({
-        id: item.id,
-        label: item.name,
-        icon: item.icon ?? "◦",
-        path: item.route ?? "",
-        badge: (item as any).badge ?? undefined
-      })),
-    [dynamicModules]
-  );
+  const sidebarItems = useMemo(() => {
+    // 1. Get all root-level items (parent is "/")
+    const roots = dynamicModules
+      .filter((item) => item.parent === "/")
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+
+    // 2. Map roots, attaching children to sections
+    return roots.map((root) => {
+      const isSection = root.pageContent === "section";
+      const children = isSection
+        ? dynamicModules
+            .filter((item) => item.parent === root.id)
+            .sort((a, b) => a.sortOrder - b.sortOrder)
+        : [];
+      return {
+        ...root,
+        isSection,
+        children
+      };
+    });
+  }, [dynamicModules]);
 
   useEffect(() => {
     if (initialModules !== undefined) {
@@ -267,10 +277,7 @@ export function ProtectedSidebarLayout({
                 onScroll={updateScrollHints}
                 className="hide-scrollbar relative h-full overflow-y-auto"
               >
-                {compact ? <div className="mx-auto mb-3 h-px w-12 bg-white/20" /> : null}
-                <p className={`px-2 pb-2 text-[10px] uppercase tracking-[0.18em] text-white/55 ${compact ? "text-center" : ""}`}>
-                  {compact ? "Menu" : "Modulos"}
-                </p>
+
                 {modulesError ? (
                   <div className="rounded-xl border border-rose-300/35 bg-rose-950/35 px-3 py-2 text-xs text-rose-100">
                     No se pudo cargar el menu. Intenta de nuevo.
@@ -283,13 +290,62 @@ export function ProtectedSidebarLayout({
                     <div className="h-8 animate-pulse rounded-lg bg-white/12" />
                   </div>
                 ) : null}
-                {!modulesLoading && !modulesError && navItems.length === 0 ? (
+                {!modulesLoading && !modulesError && sidebarItems.length === 0 ? (
                   <div className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs text-white/85">Sin modulos disponibles</div>
                 ) : null}
                 {!modulesLoading && !modulesError ? (
-                  <nav className={compact ? "space-y-" : "space-y-1"}>
-                    {navItems.map((item) => {
-                      const href = `/${locale}${item.path}`;
+                  <nav className={compact ? "space-y-2" : "space-y-1"}>
+                    {sidebarItems.map((group) => {
+                      if (group.isSection) {
+                        return (
+                          <div key={group.id} className="space-y-1">
+                            {compact ? <div className="mx-auto mb-3 h-px w-12 bg-white/20" /> : null}
+                            <p className={`px-2 pb-0 pt-4 text-[10px] uppercase tracking-[0.18em] text-white/55 ${compact ? "text-center" : ""}`}>
+                              {group.name}
+                            </p>
+                            {/* Children under the section */}
+                            {group.children.map((child) => {
+                              const href = `/${locale}${child.route}`;
+                              const isActive = pathname === href;
+                              return (
+                                <Link
+                                  key={href}
+                                  href={href}
+                                  className={`group flex w-full items-center text-left text-white/90 transition duration-300 ${isActive
+                                    ? expanded
+                                      ? "gap-3 rounded-xl border border-cyan-300/40 bg-cyan-300/15 px-2 py-2"
+                                      : "justify-center rounded-lg bg-cyan-300/20 px-0 py-2.5 text-cyan-100"
+                                    : expanded
+                                      ? "gap-3 rounded-xl border border-transparent px-2 py-2 hover:border-white/20 hover:bg-white/12"
+                                      : "justify-center rounded-lg px-0 py-2.5 hover:bg-white/10 hover:text-white"
+                                    }`}
+                                >
+                                  <span className={`grid place-items-center text-[22px] leading-none text-white/95 ${expanded ? "h-9 w-9" : "h-7 w-7"}`}>
+                                    {child.icon && isImageIcon(child.icon) ? (
+                                      <img src={child.icon} alt="icon" className="h-5 w-5 object-contain" />
+                                    ) : (
+                                      normalizeTextIcon(child.icon ?? "")
+                                    )}
+                                  </span>
+                                  {expanded ? (
+                                    <>
+                                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{child.name}</span>
+                                      {child.badge ? (
+                                        <span className="rounded-full bg-cyan-300/25 px-2 py-0.5 text-[10px] font-semibold text-cyan-100">
+                                          {child.badge}
+                                        </span>
+                                      ) : null}
+                                    </>
+                                  ) : null}
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        );
+                      }
+
+                      // Standard top-level route link (not a section)
+                      const href = `/${locale}${group.route}`;
                       const isActive = pathname === href;
                       return (
                         <Link
@@ -305,18 +361,18 @@ export function ProtectedSidebarLayout({
                             }`}
                         >
                           <span className={`grid place-items-center text-[22px] leading-none text-white/95 ${expanded ? "h-9 w-9" : "h-7 w-7"}`}>
-                            {isImageIcon(item.icon) ? (
-                              <img src={item.icon} alt="icon" className="h-5 w-5 object-contain" />
+                            {group.icon && isImageIcon(group.icon) ? (
+                              <img src={group.icon} alt="icon" className="h-5 w-5 object-contain" />
                             ) : (
-                              normalizeTextIcon(item.icon)
+                              normalizeTextIcon(group.icon ?? "")
                             )}
                           </span>
                           {expanded ? (
                             <>
-                              <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{item.label}</span>
-                              {item.badge ? (
+                              <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{group.name}</span>
+                              {group.badge ? (
                                 <span className="rounded-full bg-cyan-300/25 px-2 py-0.5 text-[10px] font-semibold text-cyan-100">
-                                  {item.badge}
+                                  {group.badge}
                                 </span>
                               ) : null}
                             </>

@@ -60,7 +60,7 @@ export async function requireProtectedSettingContext(locale: string) {
       icon: toText(row.icon) || null,
       parent: toText(row.parent),
       status: toText(row.status).toLowerCase(),
-      pageContent: toText(row.page_content) || null,
+      pageContent: toText(row.page_content || row.content) || null,
       sortOrder: toSort(row.sort_order ?? row.order)
     }))
     .filter((item) => item.status === "active")
