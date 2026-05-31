@@ -25,7 +25,8 @@ enum UserStatus {
 
 enum RoleScope {
   SU
-  CLIENT 
+  Admin
+  User
 }
 
 enum CampaignStatus {
@@ -189,6 +190,7 @@ model Role {
 
   users                    UserRole[]
   permissions              RolePermission[]
+  securityBackup           RolePermissionSecurity?
 
   createdAt                DateTime   @default(now())
   updatedAt                DateTime   @updatedAt
@@ -201,6 +203,7 @@ model UserRole {
   id             String       @id @default(cuid())
   platformUserId String       @map("platform_user_id")
   roleId         String
+  hashPermission String?      @map("hash_permission")
 
   user           PlatformUser @relation(fields: [platformUserId], references: [idUserPk])
   role           Role         @relation(fields: [roleId], references: [id])
@@ -229,6 +232,7 @@ model Module {
   destination  String?  @db.VarChar(255)
 
   permissions RolePermission[]
+  actions     Json?
 
   @@map("Modules")
 }
@@ -243,12 +247,23 @@ model RolePermission {
   canUpdate Boolean @default(false)
   canDelete Boolean @default(false)
   actions   Json?
+  status    String  @default("active") @db.VarChar(20)
 
   role      Role   @relation(fields: [roleId], references: [id])
   module    Module @relation(fields: [moduleId], references: [id])
 
-  @@unique([roleId, moduleId])
+  @@index([roleId, moduleId])
   @@index([moduleId])
+}
+
+model RolePermissionSecurity {
+  id        String   @id @default(cuid())
+  roleId    String   @unique
+  backup    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
 }
 
 model Product {

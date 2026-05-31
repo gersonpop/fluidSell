@@ -5,6 +5,12 @@ import Image from "next/image";
 import {useTranslations} from "next-intl";
 import {useRouter} from "next/navigation";
 
+type ModuleAction = {
+  id: string;
+  label: string;
+  status?: "active" | "inactive" | "deprecated";
+};
+
 type ModuleItem = {
   id: string;
   code: string;
@@ -19,6 +25,7 @@ type ModuleItem = {
   content?: string | null;
   updated_at?: string | null;
   destination?: string | null;
+  actions?: ModuleAction[] | any;
 };
 
 type ScopeItem = {id: string; value?: string; name?: string};
@@ -80,10 +87,19 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
   const [statuses, setStatuses] = useState<StatusItem[]>([]);
   const [pageContents, setPageContents] = useState<PageContentItem[]>([]);
   const [destinations, setDestinations] = useState<{value: string; label: string}[]>([]);
+
+  // Modal de gestión de acciones/microroles
+  const [actionsModalOpen, setActionsModalOpen] = useState(false);
+  const [selectedModule, setSelectedModule] = useState<ModuleItem | null>(null);
+  const [moduleActions, setModuleActions] = useState<ModuleAction[]>([]);
+  const [newActionId, setNewActionId] = useState("");
+  const [newActionLabel, setNewActionLabel] = useState("");
+  const [actionError, setActionError] = useState("");
   const [form, setForm] = useState(defaultForm);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [scopeFilter, setScopeFilter] = useState<string>("all");
+  const [embeddedFilter, setEmbeddedFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<keyof ModuleItem>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
@@ -98,6 +114,34 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const [toasts, setToasts] = useState<Array<{
+    id: string;
+    type: "success" | "warning" | "error" | "info";
+    message: string;
+  }>>([]);
+
+  const showToast = useCallback((message: string, type: "success" | "warning" | "error" | "info" = "error") => {
+    const id = `toast-${Date.now()}-${Math.random()}`;
+    setToasts((prev) => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  }, []);
+
+  useEffect(() => {
+    if (error) {
+      showToast(error, "error");
+      setError(null);
+    }
+  }, [error, showToast]);
+
+  useEffect(() => {
+    if (success) {
+      showToast(success, "success");
+      setSuccess(null);
+    }
+  }, [success, showToast]);
   const [iconPreview, setIconPreview] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof typeof defaultForm, string>>>({});
 
@@ -232,13 +276,47 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
 
   const visibleModules = useMemo(() => {
     const term = search.trim().toLowerCase();
+    
+    // Obtener el módulo embebido seleccionado si aplica
+    const selectedEmbed = embeddedFilter !== "all" ? modules.find(m => m.id === embeddedFilter) : null;
+    
+    // Obtener descendientes del embebido seleccionado de forma recursiva
+    const embedDescendants = (() => {
+      if (!selectedEmbed) return new Set<string>();
+      const descendants = new Set<string>();
+      const queue = [selectedEmbed.id];
+      while (queue.length > 0) {
+        const currId = queue.shift()!;
+        const children = modules.filter(m => m.parent === currId);
+        for (const child of children) {
+          if (!descendants.has(child.id)) {
+            descendants.add(child.id);
+            queue.push(child.id);
+          }
+        }
+      }
+      return descendants;
+    })();
+
     const filtered = modules.filter((item) => {
       const textMatch =
         term.length === 0 ||
         [item.code, item.name, item.route ?? "", item.description ?? ""].join(" ").toLowerCase().includes(term);
       const statusMatch = statusFilter === "all" || item.status === statusFilter;
       const scopeMatch = scopeFilter === "all" || item.scope_id === scopeFilter;
-      return textMatch && statusMatch && scopeMatch;
+
+      let embedMatch = true;
+      if (selectedEmbed) {
+        const isSelf = item.id === selectedEmbed.id;
+        const isDescendant = embedDescendants.has(item.id);
+        const isRouteMatch = !!(selectedEmbed.route && item.route && (
+          item.route.startsWith(selectedEmbed.route) || 
+          item.route.includes(selectedEmbed.route)
+        ));
+        embedMatch = isSelf || isDescendant || isRouteMatch;
+      }
+
+      return textMatch && statusMatch && scopeMatch && embedMatch;
     });
 
     const sorted = [...filtered].sort((a, b) => {
@@ -260,7 +338,7 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
     });
 
     return sorted;
-  }, [modules, search, statusFilter, scopeFilter, sortBy, sortDir]);
+  }, [modules, search, statusFilter, scopeFilter, embeddedFilter, sortBy, sortDir]);
 
   const totalPages = Math.max(1, Math.ceil(visibleModules.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -283,6 +361,7 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
       {key: "scope_id", label: t("table.scope_id")},
       {key: "content", label: t("table.content")},
       {key: "updated_at", label: t("table.updatedAt")},
+      {key: "destination", label: t("table.destination")},
       {key: "actions", label: t("table.actions")}
     ],
     [t]
@@ -444,6 +523,64 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
     setSortDir("asc");
   }
 
+  const handleOpenActionsModal = (item: ModuleItem) => {
+    setSelectedModule(item);
+    const parsedActions = Array.isArray(item.actions) ? item.actions : [];
+    setModuleActions(parsedActions);
+    setNewActionId("");
+    setNewActionLabel("");
+    setActionError("");
+    setActionsModalOpen(true);
+  };
+
+  const handleAddAction = () => {
+    setActionError("");
+    const alabel = newActionLabel.trim();
+    if (!alabel) {
+      setActionError("La etiqueta de la acción es obligatoria.");
+      return;
+    }
+    // Generar un ID único corto tipo uuid/cuid (ej: act_x7f2a9)
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
+    const aid = `act_${randomSuffix}`;
+    setModuleActions((prev) => [...prev, { id: aid, label: alabel, status: "active" }]);
+    setNewActionLabel("");
+  };
+
+  const handleDeleteAction = (aid: string) => {
+    setModuleActions((prev) =>
+      prev.map((act) => (act.id === aid ? { ...act, status: "inactive" } : act))
+    );
+  };
+
+  const handleUpdateActionStatus = (aid: string, newStatus: "active" | "inactive" | "deprecated") => {
+    setModuleActions((prev) =>
+      prev.map((act) => (act.id === aid ? { ...act, status: newStatus } : act))
+    );
+  };
+
+  const handleSaveActions = async () => {
+    if (!selectedModule) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/v1/db/modules", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ id: selectedModule.id, actions: moduleActions })
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message ?? "No se pudieron guardar las acciones.");
+      setSuccess("Acciones actualizadas correctamente");
+      setActionsModalOpen(false);
+      await loadData();
+      router.refresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Error al guardar acciones");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (loading) {
     return <section className="rounded-2xl border border-slate-200 bg-white p-5 text-slate-600">{t("loadingModules")}</section>;
   }
@@ -456,12 +593,11 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
           <p className="text-sm text-slate-500">{t("description")}</p>
         </header>
 
-        {error ? <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</p> : null}
-        {success ? <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{success}</p> : null}
+
 
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="grid w-full gap-2 md:grid-cols-[1fr_180px_220px] lg:max-w-[62%]">
+            <div className="grid w-full gap-2 md:grid-cols-[1fr_130px_160px_195px] lg:max-w-[76%]">
               <input
                 value={search}
                 onChange={(e) => {
@@ -495,6 +631,23 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
                 {scopes.map((scope) => (
                   <option key={scope.id} value={scope.id}>{scope.value ?? scope.name ?? scope.id}</option>
                 ))}
+              </select>
+              <select
+                value={embeddedFilter}
+                onChange={(e) => {
+                  setEmbeddedFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="rounded-xl border border-slate-200 bg-slate-100 px-4 py-2 text-sm"
+              >
+                <option value="all">Todos los Contenidos</option>
+                {modules
+                  .filter((m) => m.content === "embedded")
+                  .map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name} ({m.route || "/"})
+                    </option>
+                  ))}
               </select>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -592,9 +745,43 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
                         return <td key={`${item.id}-content`} className="px-4 py-3">{contentLabel}</td>;
                       }
                       if (column.key === "updated_at") return <td key={`${item.id}-updated`} className="px-4 py-3">{item.updated_at ? new Date(item.updated_at).toLocaleString() : "-"}</td>;
+                      if (column.key === "destination") {
+                        const destLabel = destinations.find(d => d.value === item.destination)?.label ?? item.destination ?? "-";
+                        return <td key={`${item.id}-destination`} className="px-4 py-3">{destLabel}</td>;
+                      }
                       return (
                         <td key={`${item.id}-actions`} className="px-4 py-3 text-center">
                           <div className="flex items-center justify-center gap-1.5">
+                            {/* Gestionar Acciones (Escudo/Llave Morado) */}
+                            {item.content === "newPage" ? (
+                              <div className="group relative">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenActionsModal(item)}
+                                  className="relative flex h-8 w-8 items-center justify-center rounded-lg border border-purple-200 bg-purple-50 text-purple-600 shadow-sm hover:bg-purple-100 hover:border-purple-300 hover:text-purple-700 transition duration-150"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4.5 w-4.5">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.249-8.25-3.286Zm0 13.036h.008v.008H12v-.008Z" />
+                                  </svg>
+                                  {(() => {
+                                    const rawActions = Array.isArray(item.actions) ? item.actions : [];
+                                    const activeOrDepCount = rawActions.filter((act: any) => (act.status ?? 'active') === 'active' || act.status === 'deprecated').length;
+                                    if (activeOrDepCount === 0) return null;
+                                    return (
+                                      <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-purple-600 px-1 text-[8px] font-bold text-white shadow-sm ring-2 ring-white">
+                                        {activeOrDepCount}
+                                      </span>
+                                    );
+                                  })()}
+                                </button>
+                                <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                  Acciones
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="w-8 h-8" />
+                            )}
+
                             {/* Editar (Lápiz Azul) */}
                             <div className="group relative">
                               <button
@@ -795,6 +982,148 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
         </div>
       ) : null}
 
+      {actionsModalOpen && selectedModule ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm transition-opacity duration-200" onClick={() => setActionsModalOpen(false)} />
+          <div className="relative z-10 w-full max-w-lg transform rounded-2xl bg-white p-6 shadow-2xl transition-all duration-200 scale-100 opacity-100 border border-slate-100 flex flex-col max-h-[85vh]">
+            
+            <div className="flex items-start justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <span className="rounded-lg bg-purple-50 p-1 text-purple-600 text-sm">🛡️</span>
+                  Gestionar Acciones: {selectedModule.name}
+                </h3>
+                <p className="text-xs text-slate-500 font-mono mt-0.5">{selectedModule.route || '/'}</p>
+              </div>
+              <button type="button" onClick={() => setActionsModalOpen(false)} className="text-2xl font-bold text-slate-400 hover:text-slate-600 transition">×</button>
+            </div>
+
+            {actionError ? (
+              <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">{actionError}</p>
+            ) : null}
+
+            {/* FORMULARIO DE AGREGAR ACCIÓN */}
+            <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50/50 p-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Agregar nueva acción</h4>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Etiqueta descriptiva</label>
+                <input
+                  type="text"
+                  value={newActionLabel}
+                  onChange={(e) => setNewActionLabel(e.target.value)}
+                  placeholder="ej: Escanear Postcosecha"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 font-medium"
+                />
+              </div>
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleAddAction}
+                  className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition"
+                >
+                  Añadir
+                </button>
+              </div>
+            </div>
+
+            {/* LISTADO DE ACCIONES EXISTENTES */}
+            <div className="mt-4 flex-1 overflow-y-auto min-h-[160px] max-h-[300px] border border-slate-100 rounded-xl bg-white p-1">
+              <div className="divide-y divide-slate-50">
+                {moduleActions.map((act) => {
+                  const status = act.status || "active";
+                  return (
+                    <div key={act.id} className={`flex items-center justify-between p-2.5 rounded-lg transition duration-150 ${status === "inactive" ? "bg-slate-50 opacity-60" : status === "deprecated" ? "bg-amber-50/40 opacity-80" : "hover:bg-slate-50/50"}`}>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className={`text-xs font-semibold ${status === "inactive" ? "text-slate-400 line-through" : "text-slate-700"}`}>
+                            {act.label}
+                          </p>
+                          <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
+                            status === "active" 
+                              ? "bg-emerald-50 text-emerald-700 border border-emerald-100" 
+                              : status === "deprecated" 
+                                ? "bg-amber-50 text-amber-700 border border-amber-100" 
+                                : "bg-slate-100 text-slate-500 border border-slate-200"
+                          }`}>
+                            {status === "active" ? "Activo" : status === "deprecated" ? "Deprecado" : "Inactivo"}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">id: {act.id}</p>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        {/* Botón de Activar (si está inactivo o deprecado) */}
+                        {status !== "active" && (
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateActionStatus(act.id, "active")}
+                            className="flex h-7 w-7 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 hover:border-emerald-300 transition duration-150"
+                            title="Activar acción"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="w-3.5 h-3.5">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                            </svg>
+                          </button>
+                        )}
+
+                        {/* Botón de alternar Deprecado (si está activo o inactivo) */}
+                        {status !== "deprecated" && (
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateActionStatus(act.id, "deprecated")}
+                            className="flex h-7 w-7 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100 hover:border-amber-300 transition duration-150"
+                            title="Marcar como Deprecado"
+                          >
+                            ⚠️
+                          </button>
+                        )}
+
+                        {/* Botón de Desactivar (si está activo o deprecado) */}
+                        {status !== "inactive" && (
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateActionStatus(act.id, "inactive")}
+                            className="flex h-7 w-7 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 hover:border-rose-300 transition duration-150"
+                            title="Desactivar acción"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="w-3.5 h-3.5">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {moduleActions.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic text-center py-8">No hay acciones de negocio definidas para este módulo.</p>
+                ) : null}
+              </div>
+            </div>
+
+            {/* BOTONES DE PIE */}
+            <div className="mt-5 flex justify-end gap-3 border-t border-slate-100 pt-3 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setActionsModalOpen(false)}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={handleSaveActions}
+                className="rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-5 py-2.5 text-xs font-semibold transition shadow-sm"
+              >
+                {saving ? "Guardando..." : "Guardar Cambios"}
+              </button>
+            </div>
+
+          </div>
+        </div>
+      ) : null}
+
       {confirmModal.isOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm transition-opacity duration-200" onClick={() => setConfirmModal((prev) => ({...prev, isOpen: false}))} />
@@ -829,6 +1158,54 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
           </div>
         </div>
       ) : null}
+
+      {/* Toasts Container */}
+      <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[999] flex flex-col gap-2 max-w-md w-full pointer-events-none items-center px-4">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`flex items-start gap-3 p-4 rounded-xl shadow-lg border transition-all duration-300 pointer-events-auto transform translate-y-0 ${
+              toast.type === "success"
+                ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                : toast.type === "warning"
+                ? "bg-amber-50 border-amber-200 text-amber-800"
+                : toast.type === "info"
+                ? "bg-blue-50 border-blue-200 text-blue-800"
+                : "bg-rose-50 border-rose-200 text-rose-800"
+            }`}
+          >
+            {toast.type === "success" && (
+              <svg className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            {toast.type === "warning" && (
+              <svg className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            )}
+            {toast.type === "info" && (
+              <svg className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            {toast.type === "error" && (
+              <svg className="h-5 w-5 text-rose-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            <div className="flex-1 text-sm font-medium">{toast.message}</div>
+            <button
+              onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+              className="text-slate-400 hover:text-slate-600 transition shrink-0"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }

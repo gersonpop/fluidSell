@@ -6,6 +6,7 @@ import {
   isCorsOriginAllowed,
   listRecords,
   updateRecord,
+  repairRoleRecord,
   type ActorContext
 } from "@/server/pgDynamicDbStore";
 
@@ -229,6 +230,19 @@ export async function PATCH(request: Request, {params}: Params) {
     if (!id) {
       return withCors(NextResponse.json({message: "id is required"}, {status: 400}), request);
     }
+
+    if (table === "roles" && body.action === "repair") {
+      const repairAction = body.repairAction;
+      if (repairAction !== "restore" && repairAction !== "scratch") {
+        return withCors(
+          NextResponse.json({message: "Acción de reparación no válida. Debe ser 'restore' o 'scratch'."}, {status: 400}),
+          request
+        );
+      }
+      const result = await repairRoleRecord(auth.actor, id, repairAction);
+      return withCors(NextResponse.json({table, data: result}), request);
+    }
+
     const patch = {...body};
     delete patch.id;
     const row = await updateRecord(auth.actor, table, id, patch);

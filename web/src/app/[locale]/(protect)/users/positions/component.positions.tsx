@@ -88,6 +88,34 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const [toasts, setToasts] = useState<Array<{
+    id: string;
+    type: "success" | "warning" | "error" | "info";
+    message: string;
+  }>>([]);
+
+  const showToast = useCallback((message: string, type: "success" | "warning" | "error" | "info" = "error") => {
+    const id = `toast-${Date.now()}-${Math.random()}`;
+    setToasts((prev) => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  }, []);
+
+  useEffect(() => {
+    if (error) {
+      showToast(error, "error");
+      setError(null);
+    }
+  }, [error, showToast]);
+
+  useEffect(() => {
+    if (success) {
+      showToast(success, "success");
+      setSuccess(null);
+    }
+  }, [success, showToast]);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof typeof defaultForm, string>>>({});
 
   const [confirmModal, setConfirmModal] = useState<{
@@ -430,8 +458,7 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
           <p className="text-sm text-slate-500">Crea y administra los cargos (roles) del sistema desde BD usando API dinámica.</p>
         </header>
 
-        {error ? <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{error}</p> : null}
-        {success ? <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{success}</p> : null}
+
 
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -734,6 +761,54 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
           </div>
         </div>
       ) : null}
+
+      {/* Toasts Container */}
+      <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[999] flex flex-col gap-2 max-w-md w-full pointer-events-none items-center px-4">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`flex items-start gap-3 p-4 rounded-xl shadow-lg border transition-all duration-300 pointer-events-auto transform translate-y-0 ${
+              toast.type === "success"
+                ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                : toast.type === "warning"
+                ? "bg-amber-50 border-amber-200 text-amber-800"
+                : toast.type === "info"
+                ? "bg-blue-50 border-blue-200 text-blue-800"
+                : "bg-rose-50 border-rose-200 text-rose-800"
+            }`}
+          >
+            {toast.type === "success" && (
+              <svg className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            {toast.type === "warning" && (
+              <svg className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            )}
+            {toast.type === "info" && (
+              <svg className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            {toast.type === "error" && (
+              <svg className="h-5 w-5 text-rose-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            <div className="flex-1 text-sm font-medium">{toast.message}</div>
+            <button
+              onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+              className="text-slate-400 hover:text-slate-600 transition shrink-0"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }

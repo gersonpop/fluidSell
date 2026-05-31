@@ -68,29 +68,35 @@ export async function requireProtectedSettingContext(locale: string) {
 
   const initialSidebarModules = selectSidebarModulesFromDbRows(rows);
 
-  return {session, actor, modules, initialSidebarModules};
+  return {session, actor, modules, initialSidebarModules, rows};
 }
 
-export function getSettingParent(modules: SettingModule[]) {
-  return modules.find((module) => module.parent === "/" && module.route === "/setting") ?? null;
-}
-
-export function getSettingChildren(modules: SettingModule[], parent: SettingModule | null) {
-  if (!parent) return [];
-  return modules.filter((module) => module.parent === parent.id);
-}
-
-type SettingLayoutProps = {
+type LayoutProps = {
   params: Promise<{locale: string}>;
   children: React.ReactNode;
 };
 
-export default async function SettingLayout({params, children}: SettingLayoutProps) {
+export default async function DynamicEmbeddedLayout({params, children}: LayoutProps) {
   const {locale} = await params;
-  const {session, actor, modules, initialSidebarModules} = await requireProtectedSettingContext(locale);
-  const settingParent = getSettingParent(modules);
-  const childrenModules = getSettingChildren(modules, settingParent);
-  const pageContent = (settingParent?.pageContent ?? "embedded").toLowerCase();
+  const {session, actor, initialSidebarModules, rows} = await requireProtectedSettingContext(locale);
+
+  const currentRoute = "/setting";
+  const currentModule = rows.find(m => m.route === currentRoute && m.status === "active");
+  const childrenModules = rows
+    .filter(m => m.parent === currentModule?.id && m.status === "active")
+    .map(row => ({
+      id: String(row.id),
+      code: String(row.code),
+      name: String(row.name),
+      description: String(row.description ?? ""),
+      route: String(row.route),
+      icon: String(row.icon || "") || null,
+      parent: String(row.parent),
+      status: String(row.status),
+      pageContent: String(row.page_content || row.pageContent || row.content || ""),
+      sortOrder: Number(row.sort_order ?? row.sortOrder ?? 100)
+    }))
+    .sort((a, b) => a.sortOrder - b.sortOrder);
 
   return (
     <ProtectedSidebarLayout
@@ -102,16 +108,12 @@ export default async function SettingLayout({params, children}: SettingLayoutPro
       actorRole={actor.role}
       companyId={actor.companyId}
       initialModules={initialSidebarModules}
-      title="Configuracion"
-      description="Contenido renderizado desde modules dentro de contentSidebar"
+      title={currentModule ? toText(currentModule.name) : "setting"}
+      description={currentModule ? toText(currentModule.description) : ""}
     >
-      {pageContent === "embedded" ? (
-        <EmbeddedPattern locale={locale} parentTitle={settingParent?.name ?? "Configuracion"} items={childrenModules}>
-          {children}
-        </EmbeddedPattern>
-      ) : (
-        children
-      )}
+      <EmbeddedPattern locale={locale} parentTitle={currentModule ? toText(currentModule.name) : "setting"} items={childrenModules}>
+        {children}
+      </EmbeddedPattern>
     </ProtectedSidebarLayout>
   );
 }

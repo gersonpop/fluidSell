@@ -1,6 +1,7 @@
 import { getPgPool } from "@/server/postgres";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
+import { createHmac, createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
 import { join } from "node:path";
 import { invalidateCatalogCache } from "@/server/auth/onboarding";
 
@@ -43,7 +44,7 @@ const TABLE_MAP = {
   oauth_sessions: 'public.oauth_sessions',
   roles: 'public."Role"',
   role_assignments: 'public."UserRole"',
-  audit_logs: 'public.audit_logs',
+  audit_logs: 'public."AuditLog"',
   st_multidata: 'public."st_Multidata"',
   st_country: 'public."st_Country"',
   st_state: 'public."st_State"',
@@ -168,12 +169,22 @@ async function resolveParentAwareRoute(route: string | null, parentId: string | 
     return `/${currentSegments.join("/")}`;
   }
 
-  const parentResult = await getPgPool().query<{ route: string | null }>("select route from public.\"Modules\" where id=$1 limit 1", [parentId]);
+  const parentResult = await getPgPool().query<{ route: string | null; content: string | null }>(
+    "select route, content from public.\"Modules\" where id=$1 limit 1",
+    [parentId]
+  );
   if ((parentResult.rowCount ?? 0) === 0) {
     throw new Error("parent module not found");
   }
 
-  const parentRoute = parentResult.rows[0].route;
+  const parent = parentResult.rows[0];
+  const parentContent = parent.content ? normalizePageContentKind(parent.content) : null;
+  if (parentContent === "section") {
+    // If the parent is a section visual divider, do not nest the route; treat it as a root-level sidebar item
+    return `/${currentSegments.join("/")}`;
+  }
+
+  const parentRoute = parent.route;
   const parentSegments = normalizeModuleRoutePath(parentRoute);
   if (!parentSegments) {
     return `/${currentSegments.join("/")}`;
@@ -468,9 +479,10 @@ async function createModuleRecord(actor: ActorContext, payload: Record<string, u
   await validateModuleParent(parent);
   const effectiveRoute = await resolveParentAwareRoute(payload.route ? String(payload.route) : null, parent);
   const code = await generateModuleCode(name);
+  const actions = payload.actions ? JSON.stringify(payload.actions) : null;
   const result = await getPgPool().query(
-    "insert into public.\"Modules\" (code,name,description,route,icon,sort_order,status,parent,scope_id,content,destination) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *",
-    [code, name, payload.description ? String(payload.description) : null, effectiveRoute, payload.icon ? String(payload.icon) : null, sortOrder, status, parent, scopeId, pageContent, destination]
+    "insert into public.\"Modules\" (code,name,description,route,icon,sort_order,status,parent,scope_id,content,destination,actions) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *",
+    [code, name, payload.description ? String(payload.description) : null, effectiveRoute, payload.icon ? String(payload.icon) : null, sortOrder, status, parent, scopeId, pageContent, destination, actions]
   );
   await ensureModuleRouteScaffold(effectiveRoute, pageContent);
   return result.rows[0];
@@ -494,15 +506,16 @@ async function updateModuleRecord(actor: ActorContext, id: string, patch: Record
         : await resolvePageContent(current.rows[0].content ?? "newPage"),
     parent: patch.parent !== undefined ? String(patch.parent).trim() : String(current.rows[0].parent ?? "/"),
     scope_id: patch.scope_id !== undefined ? String(patch.scope_id) : String(current.rows[0].scope_id ?? ""),
-    destination: patch.destination !== undefined ? (patch.destination ? String(patch.destination).trim() : null) : (current.rows[0].destination as string | null)
+    destination: patch.destination !== undefined ? (patch.destination ? String(patch.destination).trim() : null) : (current.rows[0].destination as string | null),
+    actions: patch.actions !== undefined ? (patch.actions ? JSON.stringify(patch.actions) : null) : (current.rows[0].actions ? JSON.stringify(current.rows[0].actions) : null)
   };
   if (!Number.isFinite(next.sort_order)) throw new Error("sort_order must be numeric");
   await validateRoleScope(next.scope_id);
   await validateModuleParent(next.parent);
   const effectiveRoute = await resolveParentAwareRoute(next.route, next.parent);
   const updated = await getPgPool().query(
-    "update public.\"Modules\" set name=$1, description=$2, route=$3, icon=$4, sort_order=$5, status=$6, parent=$7, scope_id=$8, content=$9, destination=$10, updated_at=now() where id=$11 returning *",
-    [next.name, next.description, effectiveRoute, next.icon, next.sort_order, next.status, next.parent, next.scope_id, next.content, next.destination, id]
+    "update public.\"Modules\" set name=$1, description=$2, route=$3, icon=$4, sort_order=$5, status=$6, parent=$7, scope_id=$8, content=$9, destination=$10, actions=$11, updated_at=now() where id=$12 returning *",
+    [next.name, next.description, effectiveRoute, next.icon, next.sort_order, next.status, next.parent, next.scope_id, next.content, next.destination, next.actions, id]
   );
   await ensureModuleRouteScaffold(effectiveRoute, next.content);
   return updated.rows[0];
@@ -576,9 +589,20 @@ async function deleteStMultidataRecord(actor: ActorContext, valueId: string) {
 
 async function appendAuditDeny(actor: ActorContext, table: string, reason: string) {
   try {
+    const auditId = `AUD-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
     await getPgPool().query(
-      "insert into public.audit_logs (actor_id, actor_role, table_name, action, reason, company_id, created_at) values ($1,$2,$3,$4,$5,$6,now())",
-      [actor.actorId, actor.role, table, "deny", reason, actor.companyId]
+      `INSERT INTO "AuditLog" (id, "companyId", "platformUserId", "actorType", "actorId", action, entity, metadata, "createdAt")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())`,
+      [
+        auditId,
+        actor.companyId,
+        actor.actorId,
+        actor.role,
+        actor.actorId,
+        "deny",
+        table,
+        JSON.stringify({ reason })
+      ]
     );
   } catch {
     return;
@@ -610,6 +634,10 @@ const PK_MAP = {
   companies: 'id'
 } as const;
 
+function hashPassword(password: string): string {
+  return createHmac("sha256", "user-password-salt-98234").update(password).digest("hex");
+}
+
 async function createPlatformUserRecord(actor: ActorContext, payload: Record<string, unknown>) {
   ensureSu(actor);
   const email = String(payload.user_email || payload.email || "").trim().toLowerCase();
@@ -621,6 +649,7 @@ async function createPlatformUserRecord(actor: ActorContext, payload: Record<str
   const countryIso = String(payload.country_iso || "CO").trim();
   const status = String(payload.status || "active").trim();
   const provider = String(payload.provider || "google").trim();
+  const passwordVal = payload.password ? hashPassword(String(payload.password)) : null;
 
   if (!email || !name) throw new Error("user_email and name are required");
 
@@ -630,15 +659,16 @@ async function createPlatformUserRecord(actor: ActorContext, payload: Record<str
   const result = await getPgPool().query(
     `INSERT INTO public."PlatformUser" (
       id_user_pk, user_email, username, name, last_name, phone_number, "companyId", 
-      country_code, country_iso, dni, birth_date, gender, status, provider, avatar, position, created_at, updated_at
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,now(),now()) returning *`,
+      country_code, country_iso, dni, birth_date, gender, status, provider, avatar, position, password, created_at, updated_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now(),now()) returning *`,
     [
       id, email, username, name, lastName, phone, companyId,
       countryCode, countryIso, payload.dni ? String(payload.dni) : null,
       payload.birth_date ? new Date(String(payload.birth_date)) : null,
       payload.gender ? String(payload.gender) : null,
       status, provider, payload.avatar ? String(payload.avatar) : null,
-      payload.position ? String(payload.position) : null
+      payload.position ? String(payload.position) : null,
+      passwordVal
     ]
   );
   return result.rows[0];
@@ -665,6 +695,24 @@ async function updatePlatformUserRecord(actor: ActorContext, id: string, patch: 
   const avatar = patch.avatar !== undefined ? (patch.avatar ? String(patch.avatar) : null) : row.avatar;
   const position = patch.position !== undefined ? (patch.position ? String(patch.position) : null) : row.position;
 
+  // Manejo de cambio de contraseña con verificación de contraseña anterior
+  if (patch.newPassword !== undefined) {
+    const oldPassword = String(patch.oldPassword || "");
+    const newPassword = String(patch.newPassword || "");
+    const currentHashed = row.password;
+    if (currentHashed) {
+      const hashedOld = hashPassword(oldPassword);
+      if (hashedOld !== currentHashed) {
+        throw new Error("La contraseña anterior es incorrecta.");
+      }
+    }
+    const hashedNew = hashPassword(newPassword);
+    await getPgPool().query(
+      'UPDATE public."PlatformUser" SET password=$1, updated_at=now() WHERE id_user_pk=$2',
+      [hashedNew, id]
+    );
+  }
+
   const result = await getPgPool().query(
     `UPDATE public."PlatformUser" SET 
       user_email=$1, username=$2, name=$3, last_name=$4, phone_number=$5, "companyId"=$6, 
@@ -686,20 +734,47 @@ async function deletePlatformUserRecord(actor: ActorContext, id: string) {
   if ((result.rowCount ?? 0) === 0) throw new Error("User not found");
 }
 
+/** Normaliza cualquier valor de scope al enum exacto de PostgreSQL: SU | Admin | User */
+function normalizeRoleScope(raw: string): string {
+  const map: Record<string, string> = {
+    // SU
+    "su": "SU",
+    // Admin variants
+    "admin": "Admin",
+    "adm": "Admin",
+    "administrator": "Admin",
+    "administrador": "Admin",
+    // User variants
+    "user": "User",
+    "usr": "User",
+    "client": "User",
+    "client ": "User",
+    "cliente": "User",
+    "usr ": "User",
+  };
+  const normalized = map[raw.trim().toLowerCase()];
+  if (normalized) return normalized;
+  // Si ya es un valor válido del enum, lo devuelve tal cual
+  if (["SU", "Admin", "User"].includes(raw.trim())) return raw.trim();
+  // Fallback seguro
+  return "User";
+}
+
 async function createRoleRecord(actor: ActorContext, payload: Record<string, unknown>) {
   const name = String(payload.name || "").trim();
   const key = String(payload.key_id || payload.key || "").trim().toUpperCase().slice(0, 5);
   const description = String(payload.description || "").trim();
-  const scope = String(payload.scope || "user").trim();
+  const scope = normalizeRoleScope(String(payload.scope || "User").trim());
   const companyId = actor.role !== "SU" ? actor.companyId : String(payload.company_id || payload.companyId || "900000000").trim();
 
   if (!name || !key) throw new Error("name and key_id are required");
 
   const id = `ROL-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const emptyHash = await calculateRolePermissionsHash(id);
 
   await getPgPool().query(
-    'insert into public."Role" (id, "companyId", name, key, description, scope, "createdAt", "updatedAt") values ($1, $2, $3, $4, $5, $6, now(), now())',
-    [id, companyId, name, key, description, scope]
+    'insert into public."Role" (id, "companyId", name, key, description, scope, "hashPermission", "createdAt", "updatedAt") values ($1, $2, $3, $4, $5, $6, $7, now(), now())',
+    [id, companyId, name, key, description, scope, emptyHash]
   );
 
   return {
@@ -714,10 +789,69 @@ async function createRoleRecord(actor: ActorContext, payload: Record<string, unk
   };
 }
 
+async function calculateRolePermissionsHash(roleId: string): Promise<string> {
+  const permRows = await getPgPool().query<{
+    moduleId: string;
+    canRead: boolean;
+    canCreate: boolean;
+    canUpdate: boolean;
+    canDelete: boolean;
+    actions: any;
+  }>(
+    'select "moduleId", "canRead", "canCreate", "canUpdate", "canDelete", actions from public."RolePermission" where "roleId"=$1 and "status"=\'active\' order by "moduleId" asc',
+    [roleId]
+  );
+
+  const segments = permRows.rows.map((p) => {
+    let actions: Record<string, boolean> = {};
+    if (p.actions) {
+      if (typeof p.actions === "string") {
+        try {
+          actions = JSON.parse(p.actions);
+        } catch {
+          actions = {};
+        }
+      } else {
+        actions = p.actions as Record<string, boolean>;
+      }
+    }
+    const activeActions = Object.keys(actions)
+      .filter((k) => !!actions[k])
+      .sort();
+
+    return `${p.moduleId}:${p.canRead}:${p.canCreate}:${p.canUpdate}:${p.canDelete}:${activeActions.join(",")}`;
+  });
+
+  const payload = `${roleId}||${segments.join("|")}`;
+  const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "role-permission-default-salt-39824";
+  return createHmac("sha256", secret).update(payload).digest("hex");
+}
+
+function encryptBackup(dataStr: string): string {
+  const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "backup-secret-key-salt-39824";
+  const key = scryptSync(secret, "salt", 32);
+  const iv = randomBytes(16);
+  const cipher = createCipheriv("aes-256-cbc", key, iv);
+  let encrypted = cipher.update(dataStr, "utf8", "hex");
+  encrypted += cipher.final("hex");
+  return `${iv.toString("hex")}:${encrypted}`;
+}
+
+function decryptBackup(encryptedStr: string): string {
+  const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "backup-secret-key-salt-39824";
+  const key = scryptSync(secret, "salt", 32);
+  const [ivHex, encryptedHex] = encryptedStr.split(":");
+  const iv = Buffer.from(ivHex, "hex");
+  const decipher = createDecipheriv("aes-256-cbc", key, iv);
+  let decrypted = decipher.update(encryptedHex, "hex", "utf8");
+  decrypted += decipher.final("utf8");
+  return decrypted;
+}
+
 async function updateRoleRecord(actor: ActorContext, id: string, patch: Record<string, unknown>) {
   const name = patch.name !== undefined ? String(patch.name).trim() : null;
   const description = patch.description !== undefined ? String(patch.description).trim() : null;
-  const scope = patch.scope !== undefined ? String(patch.scope).trim() : null;
+  const scope = patch.scope !== undefined ? normalizeRoleScope(String(patch.scope).trim()) : null;
 
   const updates: string[] = [];
   const values: any[] = [];
@@ -752,23 +886,75 @@ async function updateRoleRecord(actor: ActorContext, id: string, patch: Record<s
       const canDelete = !!perm.delete;
       const actions = perm.microroles || {};
 
-      const existing = await getPgPool().query(
-        'select id from public."RolePermission" where "roleId"=$1 and "moduleId"=$2',
+      // Check if incoming has any permission (any true permission or checked microroles)
+      const incomingHasAnyPermission = canRead || canCreate || canUpdate || canDelete || Object.values(actions).some(v => !!v);
+
+      // Check if there is currently an ACTIVE RolePermission record
+      const existingActiveRes = await getPgPool().query(
+        'select id from public."RolePermission" where "roleId"=$1 and "moduleId"=$2 and "status"=\'active\' limit 1',
         [id, moduleId]
       );
+      const hasActive = existingActiveRes.rows.length > 0;
+      const activeId = hasActive ? existingActiveRes.rows[0].id : null;
 
-      if (existing.rows.length > 0) {
-        await getPgPool().query(
-          'update public."RolePermission" set "canRead"=$1, "canCreate"=$2, "canUpdate"=$3, "canDelete"=$4, actions=$5 where id=$6',
-          [canRead, canCreate, canUpdate, canDelete, JSON.stringify(actions), existing.rows[0].id]
-        );
+      if (hasActive) {
+        if (!incomingHasAnyPermission) {
+          // If it had permissions (active record exists) and is saved with NO permissions:
+          // it must pass to "deprecated"
+          await getPgPool().query(
+            'update public."RolePermission" set "canRead"=$1, "canCreate"=$2, "canUpdate"=$3, "canDelete"=$4, actions=$5, "status"=\'deprecated\' where id=$6',
+            [false, false, false, false, JSON.stringify({}), activeId]
+          );
+        } else {
+          // If it has permissions, we update it normally and keep it "active"
+          await getPgPool().query(
+            'update public."RolePermission" set "canRead"=$1, "canCreate"=$2, "canUpdate"=$3, "canDelete"=$4, actions=$5, "status"=\'active\' where id=$6',
+            [canRead, canCreate, canUpdate, canDelete, JSON.stringify(actions), activeId]
+          );
+        }
       } else {
-        const permId = `RPM-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-        await getPgPool().query(
-          'insert into public."RolePermission" (id, "roleId", "moduleId", "canRead", "canCreate", "canUpdate", "canDelete", actions) values ($1, $2, $3, $4, $5, $6, $7, $8)',
-          [permId, id, moduleId, canRead, canCreate, canUpdate, canDelete, JSON.stringify(actions)]
-        );
+        // If there is no active record, but incoming HAS permissions:
+        // We create a new "active" one (we do NOT reactivate any deprecated ones)
+        if (incomingHasAnyPermission) {
+          const permId = `RPM-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+          await getPgPool().query(
+            'insert into public."RolePermission" (id, "roleId", "moduleId", "canRead", "canCreate", "canUpdate", "canDelete", actions, "status") values ($1, $2, $3, $4, $5, $6, $7, $8, \'active\')',
+            [permId, id, moduleId, canRead, canCreate, canUpdate, canDelete, JSON.stringify(actions)]
+          );
+        }
+        // If there is no active record, and incoming has NO permissions, we do nothing
       }
+    }
+
+    const newHash = await calculateRolePermissionsHash(id);
+    await getPgPool().query(
+      'update public."Role" set "hashPermission"=$1 where id=$2',
+      [newHash, id]
+    );
+
+    // Guardar el respaldo cifrado en RolePermissionSecurity
+    const activePermsRes = await getPgPool().query(
+      'select "moduleId", "canRead", "canCreate", "canUpdate", "canDelete", actions from public."RolePermission" where "roleId"=$1 and "status"=\'active\'',
+      [id]
+    );
+    const backupJson = JSON.stringify(activePermsRes.rows);
+    const encryptedBackup = encryptBackup(backupJson);
+
+    const existingBackup = await getPgPool().query(
+      'select id from public."RolePermissionSecurity" where "roleId"=$1',
+      [id]
+    );
+    if (existingBackup.rows.length > 0) {
+      await getPgPool().query(
+        'update public."RolePermissionSecurity" set backup=$1, "updatedAt"=now() where "roleId"=$2',
+        [encryptedBackup, id]
+      );
+    } else {
+      const backupId = `RPS-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+      await getPgPool().query(
+        'insert into public."RolePermissionSecurity" (id, "roleId", backup, "createdAt", "updatedAt") values ($1, $2, $3, now(), now())',
+        [backupId, id, encryptedBackup]
+      );
     }
   }
 
@@ -804,13 +990,11 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
     if (id) {
       query += ' where id=$1';
       values.push(id);
-      if (actor.role !== "SU") {
-        if (!actor.companyId) throw new Error("companyId is required");
+      if (actor.companyId) {
         query += ' and "companyId"=$2';
         values.push(actor.companyId);
       }
-    } else if (actor.role !== "SU") {
-      if (!actor.companyId) throw new Error("companyId is required");
+    } else if (actor.companyId) {
       query += ' where "companyId"=$1';
       values.push(actor.companyId);
     }
@@ -819,17 +1003,48 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
 
     const rolesList = [];
     for (const r of roleRows.rows) {
-      const permRows = await getPgPool().query('select * from public."RolePermission" where "roleId"=$1', [r.id]);
+      // Only read active role permissions (status = 'active')
+      const permRows = await getPgPool().query('select * from public."RolePermission" where "roleId"=$1 and "status"=\'active\'', [r.id]);
 
-      const permissionsMap: Record<string, any> = {};
-      for (const p of permRows.rows) {
-        permissionsMap[p.moduleId] = {
-          read: p.canRead,
-          create: p.canCreate,
-          update: p.canUpdate,
-          delete: p.canDelete,
-          microroles: p.actions || {}
-        };
+      let permissionsMap: Record<string, any> = {};
+      const recalculatedHash = await calculateRolePermissionsHash(r.id);
+      const savedHash = r.hashPermission || "";
+      let integrityStatus = "completa";
+
+      if (savedHash) {
+        if (recalculatedHash !== savedHash) {
+          console.error(`[SECURITY ALERT] Permissions integrity violation detected for Role ${r.id} (${r.name}). Recalculated: ${recalculatedHash}, Saved: ${savedHash}. Clearing permissions.`);
+          await appendAuditDeny(actor, "RolePermission", `Integrity breach: recalculated hash (${recalculatedHash}) does not match saved hash (${savedHash})`);
+          permissionsMap = {};
+          integrityStatus = "vulnerada";
+        } else {
+          for (const p of permRows.rows) {
+            permissionsMap[p.moduleId] = {
+              read: p.canRead,
+              create: p.canCreate,
+              update: p.canUpdate,
+              delete: p.canDelete,
+              status: p.status || "active",
+              microroles: p.actions || {}
+            };
+          }
+        }
+      } else {
+        // Retroactive lock: save the recalculated hash to secure it from now on!
+        await getPgPool().query(
+          'update public."Role" set "hashPermission"=$1 where id=$2',
+          [recalculatedHash, r.id]
+        );
+        for (const p of permRows.rows) {
+          permissionsMap[p.moduleId] = {
+            read: p.canRead,
+            create: p.canCreate,
+            update: p.canUpdate,
+            delete: p.canDelete,
+            status: p.status || "active",
+            microroles: p.actions || {}
+          };
+        }
       }
 
       rolesList.push({
@@ -840,7 +1055,8 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
         scope: r.scope,
         company_id: r.companyId,
         status: "active",
-        permissions: permissionsMap
+        permissions: permissionsMap,
+        integrityStatus
       });
     }
     return rolesList;
@@ -869,6 +1085,44 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
       expiresAt: Date.now() + STATIC_CACHE_TTL_MS
     };
     return all.rows;
+  }
+
+  if (table === "role_assignments") {
+    let query = 'select ur.* from public."UserRole" ur';
+    const values: string[] = [];
+    if (id) {
+      query += ' where ur.id=$1';
+      values.push(id);
+      if (actor.companyId) {
+        query += ' and ur.platform_user_id in (select id_user_pk from public."PlatformUser" where "companyId"=$2)';
+        values.push(actor.companyId);
+      }
+    } else if (actor.companyId) {
+      query += ' join public."PlatformUser" u on u.id_user_pk = ur.platform_user_id where u."companyId"=$1';
+      values.push(actor.companyId);
+    }
+    const result = await getPgPool().query(query, values);
+    
+    // Validar la firma criptográfica de integridad de cada asignación
+    const validatedRows = [];
+    for (const ur of result.rows) {
+      const isValid = await validateRoleAssignmentSecurityHash(ur.platform_user_id, ur.hash_permission, ur.roleId);
+      if (!isValid) {
+        await appendAuditDeny(
+          actor,
+          "UserRole",
+          `Integrity breach: Assignment validation failed for ID ${ur.id} (user: ${ur.platform_user_id}, role: ${ur.roleId}). Tampering suspected.`
+        );
+        validatedRows.push({
+          ...ur,
+          roleId: null,
+          compromised: true
+        });
+      } else {
+        validatedRows.push(ur);
+      }
+    }
+    return validatedRows;
   }
 
   const dbTable = TABLE_MAP[table];
@@ -906,6 +1160,7 @@ export async function createRecord(actor: ActorContext, tableParam: string, payl
   if (table === "st_multidata") return createStMultidataRecord(actor, payload);
   if (table === "users") return createPlatformUserRecord(actor, payload);
   if (table === "roles") return createRoleRecord(actor, payload);
+  if (table === "role_assignments") return createRoleAssignmentRecord(actor, payload);
   ensureSu(actor);
   throw new Error(`Create is not enabled for table '${table}'`);
 }
@@ -919,6 +1174,7 @@ export async function updateRecord(actor: ActorContext, tableParam: string, id: 
   if (table === "st_multidata") return updateStMultidataRecord(actor, id, patch);
   if (table === "users") return updatePlatformUserRecord(actor, id, patch);
   if (table === "roles") return updateRoleRecord(actor, id, patch);
+  if (table === "role_assignments") return updateRoleAssignmentRecord(actor, id, patch);
   ensureSu(actor);
   throw new Error(`Update is not enabled for table '${table}'`);
 }
@@ -944,12 +1200,404 @@ export async function deleteRecord(actor: ActorContext, tableParam: string, id: 
     await deleteRoleRecord(actor, id);
     return;
   }
+  if (table === "role_assignments") {
+    await deleteRoleAssignmentRecord(actor, id);
+    return;
+  }
   ensureSu(actor);
   throw new Error(`Delete is not enabled for table '${table}'`);
+}
+
+export async function repairRoleRecord(
+  actor: ActorContext,
+  roleId: string,
+  repairAction: "restore" | "scratch"
+) {
+  if (actor.role !== "SU") {
+    throw new Error("Forbidden: Solo el Super Usuario (SU) está autorizado para reparar la integridad de un cargo.");
+  }
+
+  const roleRes = await getPgPool().query<{ name: string; hashPermission: string }>(
+    'select name, "hashPermission" from public."Role" where id=$1 limit 1',
+    [roleId]
+  );
+  if (roleRes.rows.length === 0) throw new Error("Role not found");
+  const role = roleRes.rows[0];
+
+  if (repairAction === "scratch") {
+    await getPgPool().query(
+      'update public."RolePermission" set "status"=\'deprecated\' where "roleId"=$1 and "status"=\'active\'',
+      [roleId]
+    );
+
+    const emptyHash = await calculateRolePermissionsHash(roleId);
+    await getPgPool().query(
+      'update public."Role" set "hashPermission"=$1 where id=$2',
+      [emptyHash, roleId]
+    );
+
+    await getPgPool().query(
+      'delete from public."RolePermissionSecurity" where "roleId"=$1',
+      [roleId]
+    );
+
+    await appendAuditDeny(actor, "RolePermission", `Cargo "${role.name}" configurado desde cero por SU.`);
+    return { ok: true, report: `El cargo "${role.name}" fue configurado desde cero con éxito. Todos los permisos antiguos fueron revocados.` };
+  }
+
+  if (repairAction === "restore") {
+    const backupRes = await getPgPool().query<{ backup: string }>(
+      'select backup from public."RolePermissionSecurity" where "roleId"=$1 limit 1',
+      [roleId]
+    );
+    if (backupRes.rows.length === 0) {
+      throw new Error("No existe copia de seguridad guardada para este cargo. Por favor, configúrelo desde cero.");
+    }
+
+    const decryptedBackup = decryptBackup(backupRes.rows[0].backup);
+    const backupPermissions: Array<{
+      moduleId: string;
+      canRead: boolean;
+      canCreate: boolean;
+      canUpdate: boolean;
+      canDelete: boolean;
+      actions: any;
+    }> = JSON.parse(decryptedBackup);
+
+    const currentActiveRes = await getPgPool().query<{
+      id: string;
+      moduleId: string;
+      canRead: boolean;
+      canCreate: boolean;
+      canUpdate: boolean;
+      canDelete: boolean;
+      actions: any;
+    }>(
+      'select id, "moduleId", "canRead", "canCreate", "canUpdate", "canDelete", actions from public."RolePermission" where "roleId"=$1 and "status"=\'active\'',
+      [roleId]
+    );
+    const currentActive = currentActiveRes.rows;
+
+    const differences: string[] = [];
+    const currentMap = new Map(currentActive.map((p) => [p.moduleId, p]));
+    const backupMap = new Map(backupPermissions.map((p) => [p.moduleId, p]));
+
+    for (const [moduleId, bp] of backupMap.entries()) {
+      const cp = currentMap.get(moduleId);
+      const modNameRes = await getPgPool().query<{ name: string }>(
+        'select name from public."Modules" where id=$1 limit 1',
+        [moduleId]
+      );
+      const modName = modNameRes.rows[0]?.name || moduleId;
+
+      if (!cp) {
+        differences.push(`Módulo "${modName}": Permiso legítimo ELIMINADO en base de datos.`);
+      } else {
+        if (bp.canRead !== cp.canRead) {
+          differences.push(`Módulo "${modName}" -> Leer: Modificado de ${bp.canRead} a ${cp.canRead}.`);
+        }
+        if (bp.canCreate !== cp.canCreate) {
+          differences.push(`Módulo "${modName}" -> Crear: Modificado de ${bp.canCreate} a ${cp.canCreate}.`);
+        }
+        if (bp.canUpdate !== cp.canUpdate) {
+          differences.push(`Módulo "${modName}" -> Actualizar: Modificado de ${bp.canUpdate} a ${cp.canUpdate}.`);
+        }
+        if (bp.canDelete !== cp.canDelete) {
+          differences.push(`Módulo "${modName}" -> Borrar: Modificado de ${bp.canDelete} a ${cp.canDelete}.`);
+        }
+
+        const bpActions = typeof bp.actions === 'string' ? JSON.parse(bp.actions) : (bp.actions || {});
+        const cpActions = typeof cp.actions === 'string' ? JSON.parse(cp.actions) : (cp.actions || {});
+        
+        const allActionKeys = new Set([...Object.keys(bpActions), ...Object.keys(cpActions)]);
+        for (const actKey of allActionKeys) {
+          const bpVal = !!bpActions[actKey];
+          const cpVal = !!cpActions[actKey];
+          if (bpVal !== cpVal) {
+            differences.push(`Módulo "${modName}" -> Acción "${actKey}": Modificada de ${bpVal} a ${cpVal}.`);
+          }
+        }
+      }
+    }
+
+    for (const [moduleId, cp] of currentMap.entries()) {
+      if (!backupMap.has(moduleId)) {
+        const modNameRes = await getPgPool().query<{ name: string }>(
+          'select name from public."Modules" where id=$1 limit 1',
+          [moduleId]
+        );
+        const modName = modNameRes.rows[0]?.name || moduleId;
+        differences.push(`Módulo "${modName}": Permisos ILEGALES añadidos por fuera de la aplicación.`);
+      }
+    }
+
+    const reportText = differences.length > 0
+      ? `Se detectaron las siguientes discrepancias en base de datos:\n${differences.map((d, i) => `${i + 1}. ${d}`).join("\n")}`
+      : `No se encontraron diferencias en permisos individuales, pero la firma de seguridad fue vulnerada.`;
+
+    await getPgPool().query(
+      'update public."RolePermission" set "status"=\'deprecated\' where "roleId"=$1 and "status"=\'active\'',
+      [roleId]
+    );
+
+    for (const bp of backupPermissions) {
+      const permId = `RPM-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+      await getPgPool().query(
+        'insert into public."RolePermission" (id, "roleId", "moduleId", "canRead", "canCreate", "canUpdate", "canDelete", actions, "status") values ($1, $2, $3, $4, $5, $6, $7, $8, \'active\')',
+        [permId, roleId, bp.moduleId, bp.canRead, bp.canCreate, bp.canUpdate, bp.canDelete, typeof bp.actions === 'string' ? bp.actions : JSON.stringify(bp.actions)]
+      );
+    }
+
+    const restoredHash = await calculateRolePermissionsHash(roleId);
+    await getPgPool().query(
+      'update public."Role" set "hashPermission"=$1 where id=$2',
+      [restoredHash, roleId]
+    );
+
+    const auditId = `AUD-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    await getPgPool().query(
+      `INSERT INTO "AuditLog" (id, "companyId", "platformUserId", "actorType", "actorId", action, entity, "entityId", metadata, "createdAt")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, NOW())`,
+      [
+        auditId,
+        actor.companyId,
+        actor.actorId,
+        actor.role,
+        actor.actorId,
+        "repair_audit_report",
+        "RolePermission",
+        roleId,
+        JSON.stringify({ report: reportText })
+      ]
+    );
+
+    return { ok: true, report: reportText };
+  }
+
+  throw new Error("Acción de reparación no válida");
 }
 
 export { isCorsOriginAllowed };
 
 export async function auditDenied(actor: ActorContext, table: string, reason: string) {
   await appendAuditDeny(actor, table, reason);
+}
+
+// ==========================================
+// CAPA DE SEGURIDAD CRIPTOGRÁFICA Y CRUD PARA ASIGNACIÓN DE ROLES
+// ==========================================
+
+export function encryptWithKey(text: string, keyMaterial: string): string {
+  const key = scryptSync(keyMaterial, "role-assignment-salt", 32);
+  const iv = randomBytes(16);
+  const cipher = createCipheriv("aes-256-cbc", key, iv);
+  let encrypted = cipher.update(text, "utf8", "hex");
+  encrypted += cipher.final("hex");
+  return `${iv.toString("hex")}:${encrypted}`;
+}
+
+export function decryptWithKey(encryptedText: string, keyMaterial: string): string {
+  const key = scryptSync(keyMaterial, "role-assignment-salt", 32);
+  const parts = encryptedText.split(":");
+  if (parts.length !== 2) {
+    throw new Error("Invalid encrypted text format");
+  }
+  const [ivHex, encryptedHex] = parts;
+  const iv = Buffer.from(ivHex!, "hex");
+  const decipher = createDecipheriv("aes-256-cbc", key, iv);
+  let decrypted = decipher.update(encryptedHex!, "hex", "utf8");
+  decrypted += decipher.final("utf8");
+  return decrypted;
+}
+
+export async function calculateRoleAssignmentSecurityHash(
+  platformUserId: string,
+  roleId: string
+): Promise<string> {
+  const roleRes = await getPgPool().query<{ id: string; scope: string; key: string; companyId: string }>(
+    'select id, scope, key, "companyId" from public."Role" where id=$1 limit 1',
+    [roleId]
+  );
+  if (roleRes.rows.length === 0) {
+    throw new Error(`Role ${roleId} not found`);
+  }
+  const role = roleRes.rows[0]!;
+
+  // Cifrado interno: positionId cifrado con el companyId del tenant
+  const positionIdCiphered = encryptWithKey(role.id, String(role.companyId));
+
+  const payload = {
+    scope: role.scope,
+    positionName: role.key,
+    positionId: positionIdCiphered,
+    companyId: Number(role.companyId)
+  };
+
+  const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "default-outer-salt-2849";
+  const outerKeyMaterial = `${platformUserId}-${secret}`;
+
+  return encryptWithKey(JSON.stringify(payload), outerKeyMaterial);
+}
+
+export async function validateRoleAssignmentSecurityHash(
+  platformUserId: string,
+  hashPermission: string | null,
+  roleId: string
+): Promise<boolean> {
+  if (!hashPermission) return false;
+
+  try {
+    const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "default-outer-salt-2849";
+    const outerKeyMaterial = `${platformUserId}-${secret}`;
+
+    const decryptedJson = decryptWithKey(hashPermission, outerKeyMaterial);
+    const payload = JSON.parse(decryptedJson) as {
+      scope: string;
+      positionName: string;
+      positionId: string;
+      companyId: number;
+    };
+
+    const companyIdStr = String(payload.companyId);
+    const decryptedRoleId = decryptWithKey(payload.positionId, companyIdStr);
+
+    if (decryptedRoleId !== roleId) {
+      return false;
+    }
+
+    const roleRes = await getPgPool().query<{ scope: string; key: string; companyId: string }>(
+      'select scope, key, "companyId" from public."Role" where id=$1 limit 1',
+      [roleId]
+    );
+    if (roleRes.rows.length === 0) return false;
+    const role = roleRes.rows[0]!;
+
+    if (
+      role.scope !== payload.scope ||
+      role.key !== payload.positionName ||
+      String(role.companyId) !== companyIdStr
+    ) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function createRoleAssignmentRecord(actor: ActorContext, payload: Record<string, unknown>) {
+  const userId = String(payload.platform_user_id || payload.platformUserId || "").trim();
+  const roleId = String(payload.roleId || payload.role_id || "").trim();
+
+  if (!userId || !roleId) {
+    throw new Error("platform_user_id and roleId are required");
+  }
+
+  // Validaciones de multitenancy
+  if (actor.role !== "SU") {
+    if (!actor.companyId) throw new Error("companyId is required for non-SU actors");
+    const userRes = await getPgPool().query<{ companyId: string }>(
+      'select "companyId" from public."PlatformUser" where id_user_pk=$1 limit 1',
+      [userId]
+    );
+    if (userRes.rows.length === 0) throw new Error("User not found");
+    if (String(userRes.rows[0]!.companyId) !== String(actor.companyId)) {
+      throw new Error("Forbidden: cannot assign roles to users of other companies");
+    }
+
+    const roleRes = await getPgPool().query<{ companyId: string }>(
+      'select "companyId" from public."Role" where id=$1 limit 1',
+      [roleId]
+    );
+    if (roleRes.rows.length === 0) throw new Error("Role not found");
+    if (String(roleRes.rows[0]!.companyId) !== String(actor.companyId)) {
+      throw new Error("Forbidden: cannot assign roles belonging to other companies");
+    }
+  }
+
+  const hashPermission = await calculateRoleAssignmentSecurityHash(userId, roleId);
+  const id = `UR-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+
+  await getPgPool().query(
+    'insert into public."UserRole" (id, platform_user_id, "roleId", hash_permission, "createdAt") values ($1, $2, $3, $4, now())',
+    [id, userId, roleId, hashPermission]
+  );
+
+  return { id, platform_user_id: userId, roleId, hash_permission: hashPermission };
+}
+
+async function updateRoleAssignmentRecord(
+  actor: ActorContext,
+  id: string,
+  patch: Record<string, unknown>
+) {
+  const currentRes = await getPgPool().query<{ id: string; platform_user_id: string; roleId: string }>(
+    'select id, platform_user_id, "roleId" from public."UserRole" where id=$1 limit 1',
+    [id]
+  );
+  if (currentRes.rows.length === 0) {
+    throw new Error("Role assignment not found");
+  }
+  const current = currentRes.rows[0]!;
+
+  const userId = current.platform_user_id;
+  const roleId = patch.roleId !== undefined ? String(patch.roleId).trim() : current.roleId;
+
+  // Validaciones de multitenancy
+  if (actor.role !== "SU") {
+    if (!actor.companyId) throw new Error("companyId is required for non-SU actors");
+    const userRes = await getPgPool().query<{ companyId: string }>(
+      'select "companyId" from public."PlatformUser" where id_user_pk=$1 limit 1',
+      [userId]
+    );
+    if (userRes.rows.length === 0) throw new Error("User not found");
+    if (String(userRes.rows[0]!.companyId) !== String(actor.companyId)) {
+      throw new Error("Forbidden: cannot assign roles to users of other companies");
+    }
+
+    const roleRes = await getPgPool().query<{ companyId: string }>(
+      'select "companyId" from public."Role" where id=$1 limit 1',
+      [roleId]
+    );
+    if (roleRes.rows.length === 0) throw new Error("Role not found");
+    if (String(roleRes.rows[0]!.companyId) !== String(actor.companyId)) {
+      throw new Error("Forbidden: cannot assign roles belonging to other companies");
+    }
+  }
+
+  const hashPermission = await calculateRoleAssignmentSecurityHash(userId, roleId);
+
+  await getPgPool().query(
+    'update public."UserRole" set "roleId"=$1, hash_permission=$2 where id=$3',
+    [roleId, hashPermission, id]
+  );
+
+  return { id, platform_user_id: userId, roleId, hash_permission: hashPermission };
+}
+
+async function deleteRoleAssignmentRecord(actor: ActorContext, id: string) {
+  const currentRes = await getPgPool().query<{ id: string; platform_user_id: string; roleId: string }>(
+    'select id, platform_user_id, "roleId" from public."UserRole" where id=$1 limit 1',
+    [id]
+  );
+  if (currentRes.rows.length === 0) {
+    throw new Error("Role assignment not found");
+  }
+  const current = currentRes.rows[0]!;
+
+  // Validaciones de multitenancy
+  if (actor.role !== "SU") {
+    if (!actor.companyId) throw new Error("companyId is required for non-SU actors");
+    const userRes = await getPgPool().query<{ companyId: string }>(
+      'select "companyId" from public."PlatformUser" where id_user_pk=$1 limit 1',
+      [current.platform_user_id]
+    );
+    if (userRes.rows.length === 0) throw new Error("User not found");
+    if (String(userRes.rows[0]!.companyId) !== String(actor.companyId)) {
+      throw new Error("Forbidden: cannot modify roles of other companies");
+    }
+  }
+
+  await getPgPool().query('delete from public."UserRole" where id=$1', [id]);
 }

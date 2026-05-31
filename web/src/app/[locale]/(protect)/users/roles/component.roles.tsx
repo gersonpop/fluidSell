@@ -11,6 +11,7 @@ type Permission = {
   create: boolean;
   update: boolean;
   delete: boolean;
+  status?: string;
   microroles?: Record<string, boolean>;
 };
 
@@ -23,41 +24,11 @@ type RoleRecord = {
   company_id: string | null;
   status: string;
   permissions?: Record<string, Permission>;
+  permissions_count?: number;
+  integrityStatus?: "completa" | "vulnerada";
 };
 
 // Solo se cargan los módulos existentes en la base de datos
-const DEFAULT_FALLBACK_ROLES: RoleRecord[] = [
-  {
-    id: "r-superadmin",
-    key_id: "SU",
-    name: "Super Admin",
-    description: "Acceso total del sistema",
-    scope: "SU",
-    company_id: "900000000",
-    status: "active",
-    permissions: {}
-  },
-  {
-    id: "r-admin",
-    key_id: "ADM",
-    name: "Administrador",
-    description: "Acceso administrativo",
-    scope: "admin",
-    company_id: "900000000",
-    status: "active",
-    permissions: {}
-  },
-  {
-    id: "r-vendedor",
-    key_id: "VEN",
-    name: "Vendedor",
-    description: "Acceso para personal de ventas",
-    scope: "user",
-    company_id: "900000000",
-    status: "active",
-    permissions: {}
-  }
-];
 
 function getModuleIcon(route: string, dbIcon?: string | null) {
   if (dbIcon && dbIcon.trim()) return dbIcon;
@@ -104,7 +75,36 @@ export function DynamicComponent() {
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const [toasts, setToasts] = useState<Array<{
+    id: string;
+    type: "success" | "warning" | "error" | "info";
+    message: string;
+  }>>([]);
+
+  const showToast = useCallback((message: string, type: "success" | "warning" | "error" | "info" = "error") => {
+    const id = `toast-${Date.now()}-${Math.random()}`;
+    setToasts((prev) => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  }, []);
+
+  useEffect(() => {
+    if (error) {
+      showToast(error, "error");
+      setError("");
+    }
+  }, [error, showToast]);
+
+  useEffect(() => {
+    if (successMessage) {
+      showToast(successMessage, "success");
+      setSuccessMessage(null);
+    }
+  }, [successMessage, showToast]);
   const [isEditing, setIsEditing] = useState(false);
   
   // Metadatos del Rol Seleccionado
@@ -145,13 +145,117 @@ export function DynamicComponent() {
     ]
   });
 
-  // Estado para el modal personalizado
+  // Estado para el modal personalizado (microroles)
   const [modalOpen, setModalOpen] = useState(false);
   const [modalType, setModalType] = useState<"create" | "edit">("create");
   const [modalModuleId, setModalModuleId] = useState("");
   const [modalMicroKey, setModalMicroKey] = useState("");
   const [modalInputValue, setModalInputValue] = useState("");
   const [modalModuleName, setModalModuleName] = useState("");
+  const [permissionsModalOpen, setPermissionsModalOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [scopeFilter, setScopeFilter] = useState("all");
+  const [sortBy, setSortBy] = useState<keyof RoleRecord>("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(5);
+  const [showColumnsMenu, setShowColumnsMenu] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set(["key_id", "name", "description", "scope", "permissions_count", "integrity", "actions"]));
+
+  // Estado para el modal de reparación (integridad vulnerada)
+  const [repairModalOpen, setRepairModalOpen] = useState(false);
+  const [repairRoleItem, setRepairRoleItem] = useState<RoleRecord | null>(null);
+  const [repairLoading, setRepairLoading] = useState(false);
+  const [repairError, setRepairError] = useState("");
+  const [repairResult, setRepairResult] = useState<{ ok: boolean; report: string } | null>(null);
+
+  // --- DRAWER DE CREACIÓN/EDICIÓN DE CARGO ---
+  const defaultRoleForm = { key_id: "", name: "", description: "", scope: "user", company_id: "900000000" };
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerVisible, setDrawerVisible] = useState(false);
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
+  const [drawerForm, setDrawerForm] = useState(defaultRoleForm);
+  const [drawerErrors, setDrawerErrors] = useState<Partial<Record<keyof typeof defaultRoleForm, string>>>({});
+
+  function openCreateDrawer() {
+    setDrawerForm(defaultRoleForm);
+    setEditingRoleId(null);
+    setDrawerErrors({});
+    setDrawerOpen(true);
+    window.setTimeout(() => setDrawerVisible(true), 10);
+  }
+
+  function openEditDrawer(item: RoleRecord) {
+    setDrawerForm({
+      key_id: item.key_id,
+      name: item.name,
+      description: item.description || "",
+      scope: item.scope || "user",
+      company_id: item.company_id || "900000000"
+    });
+    setEditingRoleId(item.id);
+    setDrawerErrors({});
+    setDrawerOpen(true);
+    window.setTimeout(() => setDrawerVisible(true), 10);
+  }
+
+  function closeDrawer() {
+    setDrawerVisible(false);
+    window.setTimeout(() => setDrawerOpen(false), 220);
+  }
+
+  const onSubmitRoleForm = async () => {
+    const errors: Partial<Record<keyof typeof defaultRoleForm, string>> = {};
+    if (!drawerForm.name.trim()) errors.name = "El nombre del cargo es obligatorio";
+    if (!drawerForm.key_id.trim()) errors.key_id = "El ID Clave es obligatorio";
+    if (drawerForm.key_id.trim().length > 5) errors.key_id = "Máximo 5 caracteres";
+    if (!drawerForm.scope.trim()) errors.scope = "El alcance es obligatorio";
+    if (Object.keys(errors).length > 0) { setDrawerErrors(errors); return; }
+
+    setSaving(true);
+    try {
+      const payload = {
+        name: drawerForm.name.trim(),
+        key: drawerForm.key_id.trim().toUpperCase(),
+        key_id: drawerForm.key_id.trim().toUpperCase(),
+        description: drawerForm.description.trim() || null,
+        scope: drawerForm.scope,
+        company_id: drawerForm.company_id || "900000000",
+        status: "active"
+      };
+
+      const method = editingRoleId ? "PATCH" : "POST";
+      const body = editingRoleId ? { ...payload, id: editingRoleId } : payload;
+      const response = await fetch("/api/v1/db/roles", {
+        method,
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const resBody = await response.json();
+      if (!response.ok) throw new Error(resBody.message ?? "No se pudo guardar el cargo");
+
+      if (typeof window !== "undefined") localStorage.removeItem(ROLES_CACHE_KEY);
+      setSuccessMessage(editingRoleId ? "Cargo actualizado correctamente" : "Cargo creado correctamente");
+      window.setTimeout(() => setSuccessMessage(null), 3500);
+      closeDrawer();
+
+      const roleRes = await fetch("/api/v1/db/roles", { headers });
+      const roleBody = await roleRes.json();
+      const fetchedRoles = Array.isArray(roleBody?.data) ? roleBody.data : [];
+      setRoles(fetchedRoles);
+
+      // Si se creó uno nuevo, abrir modal de permisos directamente
+      if (!editingRoleId && resBody?.data?.id) {
+        setSelectedRoleId(resBody.data.id);
+        setIsEditing(true);
+        setPermissionsModalOpen(true);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al guardar el cargo");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -271,19 +375,15 @@ export function DynamicComponent() {
         try {
           const data = JSON.parse(cachedRoles);
           if (Array.isArray(data)) {
-            const list = data.length > 0 ? data : DEFAULT_FALLBACK_ROLES;
-            setRoles(list);
+            setRoles(data);
             hasLoadedRolesCache = true;
-            if (list.length > 0) {
-              setSelectedRoleId(list[0].id);
+            if (data.length > 0) {
+              setSelectedRoleId(data[0].id);
             }
           }
         } catch {
           // Ignorar
         }
-      } else {
-        setRoles(DEFAULT_FALLBACK_ROLES);
-        setSelectedRoleId(DEFAULT_FALLBACK_ROLES[0].id);
       }
     }
 
@@ -313,7 +413,7 @@ export function DynamicComponent() {
           return isSame ? prev : fetchedModules;
         });
 
-        const rolesList = fetchedRoles.length > 0 ? fetchedRoles : DEFAULT_FALLBACK_ROLES;
+        const rolesList = fetchedRoles.length > 0 ? fetchedRoles : [];
         setRoles((prev) => {
           const isSame = JSON.stringify(prev) === JSON.stringify(rolesList);
           if (isSame) return prev;
@@ -344,16 +444,160 @@ export function DynamicComponent() {
     return () => { cancelled = true; };
   }, [headers, selectedRoleId]);
 
+  // Click away listener for the column visibility menu
+  useEffect(() => {
+    const closeMenu = () => {
+      setShowColumnsMenu(false);
+    };
+    window.addEventListener("click", closeMenu);
+    return () => window.removeEventListener("click", closeMenu);
+  }, []);
+
+  const visibleRoles = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    const filtered = roles.filter((item) => {
+      const textMatch =
+        term.length === 0 ||
+        [item.key_id, item.name, item.description ?? ""].join(" ").toLowerCase().includes(term);
+      const scopeMatch = scopeFilter === "all" || item.scope === scopeFilter;
+      return textMatch && scopeMatch;
+    });
+
+    const sorted = [...filtered].sort((a, b) => {
+      if (sortBy === "permissions_count") {
+        const countA = Object.values(a.permissions || {}).filter(p => (p.status ?? 'active') === 'active').length;
+        const countB = Object.values(b.permissions || {}).filter(p => (p.status ?? 'active') === 'active').length;
+        return sortDir === "asc" ? countA - countB : countB - countA;
+      }
+
+      let left = a[sortBy];
+      let right = b[sortBy];
+
+      if (left === null || left === undefined) left = "";
+      if (right === null || right === undefined) right = "";
+
+      const leftStr = String(left).toLowerCase();
+      const rightStr = String(right).toLowerCase();
+      if (leftStr === rightStr) return 0;
+      const comparison = leftStr > rightStr ? 1 : -1;
+      return sortDir === "asc" ? comparison : -comparison;
+    });
+
+    return sorted;
+  }, [roles, search, scopeFilter, sortBy, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(visibleRoles.length / rowsPerPage));
+  const safePage = Math.min(page, totalPages);
+  const pagedRoles = useMemo(() => {
+    const start = (safePage - 1) * rowsPerPage;
+    return visibleRoles.slice(start, start + rowsPerPage);
+  }, [safePage, visibleRoles, rowsPerPage]);
+
+  const tableColumns = useMemo(() => {
+    return [
+      {key: "key_id", label: "ID Clave"},
+      {key: "name", label: "Nombre"},
+      {key: "description", label: "Descripción"},
+      {key: "scope", label: "Alcance (Scope)"},
+      {key: "permissions_count", label: "Cant. Permisos"},
+      {key: "integrity", label: "Integridad"},
+      {key: "actions", label: "Acciones"}
+    ];
+  }, []);
+
+  const headerColumns = useMemo(() => tableColumns.filter((column) => visibleColumns.has(column.key)), [tableColumns, visibleColumns]);
+
+  function toggleColumn(columnKey: string) {
+    setVisibleColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(columnKey)) {
+        if (next.size === 1) return prev;
+        next.delete(columnKey);
+      } else {
+        next.add(columnKey);
+      }
+      return next;
+    });
+  }
+
+  function setSort(column: keyof RoleRecord) {
+    if (sortBy === column) {
+      setSortDir((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortBy(column);
+    setSortDir("asc");
+  }
+
+  const handleEditPermissions = (item: RoleRecord) => {
+    setSelectedRoleId(item.id);
+    setPermissionsModalOpen(true);
+  };
+
+  const handleRepairRole = (item: RoleRecord) => {
+    setRepairRoleItem(item);
+    setRepairResult(null);
+    setRepairError("");
+    setRepairModalOpen(true);
+  };
+
+  const handleExecuteRepair = async (repairAction: "restore" | "scratch") => {
+    if (!repairRoleItem) return;
+    setRepairLoading(true);
+    setRepairError("");
+    try {
+      const response = await fetch("/api/v1/db/roles", {
+        method: "PATCH",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({
+          id: repairRoleItem.id,
+          action: "repair",
+          repairAction
+        })
+      });
+      const resBody = await response.json();
+      if (!response.ok) {
+        throw new Error(resBody.message ?? "Ocurrió un error al reparar el cargo.");
+      }
+      
+      const resData = resBody.data;
+      if (resData?.ok) {
+        setRepairResult({
+          ok: true,
+          report: resData.report || "Reparación completada sin discrepancias registradas."
+        });
+
+        // Actualizar la grilla de roles para ver los cambios y el estado de integridad corregido
+        if (typeof window !== "undefined") {
+          localStorage.removeItem(ROLES_CACHE_KEY);
+        }
+        const roleRes = await fetch("/api/v1/db/roles", { headers });
+        const roleBody = await roleRes.json();
+        const fetchedRoles = Array.isArray(roleBody?.data) ? roleBody.data : [];
+        setRoles(fetchedRoles);
+      } else {
+        throw new Error("La reparación no retornó confirmación de éxito.");
+      }
+    } catch (err) {
+      setRepairError(err instanceof Error ? err.message : "Error al procesar la reparación.");
+    } finally {
+      setRepairLoading(false);
+    }
+  };
+
   // Se listan exclusivamente los módulos existentes persistidos en la base de datos
   const activeModules = useMemo(() => {
     return dbModules
       .filter((dbMod) => dbMod.status === "active")
       .map((dbMod) => {
-        let category = "Menu Principal";
-        if (dbMod.parent === "mobile-root") {
-          category = "Aplicación Móvil";
-        } else if (dbMod.route.startsWith("/admin") || dbMod.route.startsWith("/settings")) {
-          category = "General";
+        // Fallback robusto para destination si no está definido
+        let dest = (dbMod.destination || "").trim();
+        if (!dest) {
+          if (dbMod.parent === "mobile-root") {
+            dest = "mobile";
+          } else {
+            dest = "web";
+          }
         }
 
         return {
@@ -361,18 +605,39 @@ export function DynamicComponent() {
           name: dbMod.name,
           route: dbMod.route,
           parent: dbMod.parent || "/",
-          category: category,
-          icon: getModuleIcon(dbMod.route, dbMod.icon)
+          destination: dest,
+          content: dbMod.content || "",
+          icon: getModuleIcon(dbMod.route, dbMod.icon),
+          actions: dbMod.actions
         };
       });
   }, [dbModules]);
 
   // Módulos clasificados por secciones
   const sections = useMemo(() => {
-    const categories = ["Aplicación Móvil", "Menu Principal", "General"];
-    return categories.map((cat) => {
-      const items = activeModules.filter((m) => m.category === cat);
-      
+    const DESTINATION_MAP: Record<string, string> = {
+      web: "Menú Principal",
+      mobile: "Aplicación Móvil",
+      desktop: "Aplicación de Escritorio",
+      wearable: "Dispositivos Wearables"
+    };
+
+    // 1. Identificar todos los destinos específicos presentes en los módulos cargados
+    const uniqueDestinations = new Set<string>(["web", "mobile"]);
+    activeModules.forEach((m) => {
+      if (m.destination && m.destination !== "AllApp") {
+        uniqueDestinations.add(m.destination);
+      }
+    });
+
+    const destinationOrder = Array.from(uniqueDestinations);
+
+    // 2. Agrupar módulos
+    return destinationOrder.map((destKey) => {
+      const items = activeModules.filter(
+        (m) => m.destination === destKey || m.destination === "AllApp"
+      );
+
       // Ordenar jerárquicamente: padres primero, hijos inmediatamente debajo
       const ordered: any[] = [];
       const parents = items.filter((m) => m.parent === "/" || m.parent === "mobile-root");
@@ -383,7 +648,16 @@ export function DynamicComponent() {
         ordered.push(...children);
       });
 
-      return { category: cat, items: ordered };
+      // Añadir huérfanos si existieran
+      items.forEach((m) => {
+        if (!ordered.some((o) => o.id === m.id)) {
+          ordered.push(m);
+        }
+      });
+
+      const categoryTitle = DESTINATION_MAP[destKey] || destKey.charAt(0).toUpperCase() + destKey.slice(1);
+
+      return { category: categoryTitle, items: ordered };
     });
   }, [activeModules]);
 
@@ -402,11 +676,11 @@ export function DynamicComponent() {
         company_id: selectedRole.company_id || "900000000"
       });
 
-      // Inicializar matriz de permisos desde JSON o por defecto activos
+      // Inicializar matriz de permisos desde JSON o por defecto inactivos (sin permisos)
       const savedPerms = selectedRole.permissions || {};
       const newPerms: Record<string, Permission> = {};
       activeModules.forEach((m) => {
-        newPerms[m.id] = savedPerms[m.id] || { read: true, create: true, update: true, delete: true, microroles: {} };
+        newPerms[m.id] = savedPerms[m.id] || { read: false, create: false, update: false, delete: false, microroles: {} };
       });
       setPermissions(newPerms);
     }
@@ -414,13 +688,64 @@ export function DynamicComponent() {
 
   const handleCheckboxChange = (moduleId: string, type: keyof Permission) => {
     if (!isEditing) return;
+    
+    const current = permissions[moduleId] || { read: false, create: false, update: false, delete: false, microroles: {} };
+
+    // Si se está quitando el permiso de lectura y existen otros permisos activos
+    if (type === "read" && current.read) {
+      const hasOtherPermissions = current.create || current.update || current.delete || Object.values(current.microroles || {}).some(v => !!v);
+
+      if (hasOtherPermissions) {
+        const moduleName = activeModules.find((m) => m.id === moduleId)?.name || "este módulo";
+
+        showConfirm(
+          "¿Retirar todos los permisos?",
+          `Al deshabilitar el permiso de lectura para "${moduleName}", también se desactivarán automáticamente todos los permisos de escritura (Crear, Actualizar, Borrar) y las acciones especiales configuradas. ¿Deseas continuar?`,
+          () => {
+            setPermissions((prev) => {
+              const currentPerm = prev[moduleId] || { read: false, create: false, update: false, delete: false, microroles: {} };
+              const clearedMicros: Record<string, boolean> = {};
+              if (currentPerm.microroles) {
+                Object.keys(currentPerm.microroles).forEach((key) => {
+                  clearedMicros[key] = false;
+                });
+              }
+              return {
+                ...prev,
+                [moduleId]: {
+                  ...currentPerm,
+                  read: false,
+                  create: false,
+                  update: false,
+                  delete: false,
+                  microroles: clearedMicros
+                }
+              };
+            });
+          },
+          "Desactivar todos",
+          "warning"
+        );
+        return;
+      }
+    }
+
     setPermissions((prev) => {
-      const current = prev[moduleId] || { read: false, create: false, update: false, delete: false, microroles: {} };
+      const currentPerm = prev[moduleId] || { read: false, create: false, update: false, delete: false, microroles: {} };
+      const nextVal = !currentPerm[type as keyof Permission];
+      
+      // Auto-activar lectura si se otorga cualquier permiso del CRUD
+      let nextRead = currentPerm.read;
+      if (type !== "read" && nextVal) {
+        nextRead = true;
+      }
+
       return {
         ...prev,
         [moduleId]: {
-          ...current,
-          [type]: !current[type as keyof Permission]
+          ...currentPerm,
+          [type]: nextVal,
+          read: nextRead
         } as any
       };
     });
@@ -431,13 +756,22 @@ export function DynamicComponent() {
     setPermissions((prev) => {
       const modulePerm = prev[moduleId] || { read: false, create: false, update: false, delete: false, microroles: {} };
       const currentMicros = modulePerm.microroles || {};
+      const nextMicroVal = !currentMicros[microKey];
+      
+      // Auto-activar lectura si se habilita un microrol
+      let nextRead = modulePerm.read;
+      if (nextMicroVal) {
+        nextRead = true;
+      }
+
       return {
         ...prev,
         [moduleId]: {
           ...modulePerm,
+          read: nextRead,
           microroles: {
             ...currentMicros,
-            [microKey]: !currentMicros[microKey]
+            [microKey]: nextMicroVal
           }
         }
       };
@@ -471,26 +805,19 @@ export function DynamicComponent() {
     setSaving(true);
     setError("");
     try {
-      const payload = {
-        ...roleForm,
-        permissions
-      };
-      
       const response = await fetch("/api/v1/db/roles", {
         method: "PATCH",
         headers: {...headers, "content-type": "application/json"},
-        body: JSON.stringify({ id: selectedRoleId, ...payload })
+        body: JSON.stringify({ id: selectedRoleId, permissions })
       });
       
       if (!response.ok) throw new Error("No se pudo guardar la configuración de permisos");
       
-      // Limpiar caché local e invalidar
       if (typeof window !== "undefined") {
         localStorage.removeItem(ROLES_CACHE_KEY);
       }
       setIsEditing(false);
       
-      // Recargar roles
       const roleRes = await fetch("/api/v1/db/roles", {headers});
       const roleBody = await roleRes.json();
       const fetchedRoles = Array.isArray(roleBody?.data) ? roleBody.data : [];
@@ -503,65 +830,22 @@ export function DynamicComponent() {
     }
   };
 
-  const handleAddRole = async () => {
-    const name = window.prompt("Nombre del nuevo Cargo:");
-    if (!name) return;
-    const key = window.prompt("ID Clave del Cargo (máx 5 letras, ej: VEN):");
-    if (!key) return;
-    
-    setSaving(true);
-    try {
-      const newRole = {
-        name,
-        key_id: key.toUpperCase().slice(0, 5),
-        description: `Cargo ${name} de la plataforma`,
-        scope: "user",
-        company_id: "900000000",
-        status: "active"
-      };
+  // handleAddRole ahora abre el drawer premium
+  const handleAddRole = () => openCreateDrawer();
 
-      const response = await fetch("/api/v1/db/roles", {
-        method: "POST",
-        headers: {...headers, "content-type": "application/json"},
-        body: JSON.stringify(newRole)
-      });
-      
-      if (!response.ok) throw new Error("No se pudo crear el rol");
-      const body = await response.json();
-      
-      // Actualizar listado
-      if (typeof window !== "undefined") {
-        localStorage.removeItem(ROLES_CACHE_KEY);
-      }
-      
-      const roleRes = await fetch("/api/v1/db/roles", {headers});
-      const roleBody = await roleRes.json();
-      const fetchedRoles = Array.isArray(roleBody?.data) ? roleBody.data : [];
-      setRoles(fetchedRoles);
-      if (body?.data?.id) {
-        setSelectedRoleId(body.data.id);
-      }
-      setIsEditing(true);
-    } catch (err) {
-      setError("No fue posible crear el rol en la base de datos.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDeleteRole = async () => {
+  const handleDeleteRole = async (item: RoleRecord) => {
     showConfirm(
-      "¿Eliminar este rol?",
-      "Esta acción es irreversible y removerá todos los privilegios asociados a este cargo. ¿Deseas continuar?",
+      "¿Eliminar este cargo?",
+      `Esta acción es irreversible y removerá todos los privilegios asociados al cargo "${item.name}". ¿Deseas continuar?`,
       async () => {
         setSaving(true);
         try {
           const response = await fetch("/api/v1/db/roles", {
             method: "DELETE",
             headers: {...headers, "content-type": "application/json"},
-            body: JSON.stringify({ id: selectedRoleId })
+            body: JSON.stringify({ id: item.id })
           });
-          if (!response.ok) throw new Error("No se pudo eliminar el rol");
+          if (!response.ok) throw new Error("No se pudo eliminar el cargo");
           
           if (typeof window !== "undefined") {
             localStorage.removeItem(ROLES_CACHE_KEY);
@@ -571,12 +855,13 @@ export function DynamicComponent() {
           const roleBody = await roleRes.json();
           const fetchedRoles = Array.isArray(roleBody?.data) ? roleBody.data : [];
           setRoles(fetchedRoles);
-          if (fetchedRoles.length > 0) {
+          
+          if (selectedRoleId === item.id && fetchedRoles.length > 0) {
             setSelectedRoleId(fetchedRoles[0].id);
           }
           setIsEditing(false);
         } catch {
-          setError("No fue posible eliminar el rol.");
+          setError("No fue posible eliminar el cargo.");
         } finally {
           setSaving(false);
         }
@@ -587,304 +872,839 @@ export function DynamicComponent() {
   };
 
   return (
-    <section className="flex-1 flex flex-col min-h-0 overflow-hidden text-slate-800">
-      <div className="flex flex-col gap-6 flex-shrink-0">
+    <section className="flex-1 flex flex-col min-h-0 overflow-hidden text-slate-800 bg-white rounded-2xl border border-slate-200 p-4 sm:p-5">
+      <div className="flex flex-col gap-4 flex-1 min-h-0 overflow-hidden">
         
-        {/* PANEL SUPERIOR DE ACCIONES */}
-        <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-center lg:justify-between">
-          <label className="block w-full lg:max-w-[280px]">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Cargo</span>
-            <select
-              value={selectedRoleId}
-              disabled={isEditing}
-              onChange={(e) => setSelectedRoleId(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 disabled:opacity-60"
-            >
-              {roles.map((r) => (
-                <option key={r.id} value={r.id}>{r.name}</option>
-              ))}
-            </select>
-          </label>
-          
-          <div className="flex flex-wrap items-center gap-2">
-            {!isEditing ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setIsEditing(true)}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition shadow-sm"
-                >
-                  Editar Rol
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDeleteRole}
-                  className="rounded-xl border border-rose-200 bg-rose-50 px-5 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 transition shadow-sm"
-                >
-                  Eliminar
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAddRole}
-                  className="rounded-xl bg-[#2ad072] px-6 py-2 text-sm font-bold text-white hover:bg-emerald-600 transition shadow-sm"
-                >
-                  Agregar
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setIsEditing(false)}
-                  className="rounded-xl border border-slate-200 bg-white px-5 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={handleSave}
-                  className="rounded-xl bg-blue-600 px-6 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition shadow-md"
-                >
-                  {saving ? "Guardando..." : "Guardar Cambios"}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+        {/* ENCABEZADO */}
+        <header className="flex-shrink-0">
+          <h2 className="text-2xl font-semibold">Roles y Permisos del Sistema</h2>
+          <p className="text-sm text-slate-500">Asigna privilegios de lectura, escritura y acciones específicas de negocio para cada cargo.</p>
+        </header>
 
-        {/* DETALLES Y METADATOS DEL ROL */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <label className="block">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Id clave</span>
+
+
+        {/* BARRA DE CONTROLES: BUSCADOR Y FILTROS */}
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between flex-shrink-0">
+          <div className="grid w-full gap-2 md:grid-cols-[1fr_220px] lg:max-w-[62%]">
             <input
-              value={roleForm.key_id}
-              disabled
-              placeholder="Ej: SU"
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-mono text-slate-500 outline-none"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Buscar por ID Clave, nombre o descripción..."
+              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none transition focus:border-purple-400 focus:bg-white"
             />
-          </label>
-          <label className="block">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Descripción</span>
-            <input
-              value={roleForm.description}
-              disabled={!isEditing}
-              onChange={(e) => setFormField("description", e.target.value)}
-              placeholder="Descripción del rol o cargo"
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none focus:border-blue-400 focus:bg-white disabled:opacity-60 transition"
-            />
-          </label>
-          <label className="block">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Alcance</span>
             <select
-              value={roleForm.scope}
-              disabled={!isEditing}
-              onChange={(e) => setFormField("scope", e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none focus:border-blue-400 focus:bg-white disabled:opacity-60 transition"
+              value={scopeFilter}
+              onChange={(e) => {
+                setScopeFilter(e.target.value);
+                setPage(1);
+              }}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm outline-none transition focus:border-purple-400 focus:bg-white"
             >
+              <option value="all">Todos los Alcances</option>
               <option value="user">User</option>
               <option value="admin">Admin</option>
               <option value="SU">Super Admin</option>
             </select>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setShowColumnsMenu((value) => !value);
+                }}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100 transition"
+              >
+                Columnas
+              </button>
+              {showColumnsMenu ? (
+                <div className="absolute right-0 z-20 mt-2 w-52 rounded-xl border border-slate-200 bg-white p-2 shadow-lg animate-in fade-in slide-in-from-top-1 duration-150">
+                  {tableColumns.map((column) => (
+                    <label key={column.key} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50 text-slate-700 font-medium">
+                      <input 
+                        type="checkbox" 
+                        checked={visibleColumns.has(column.key)} 
+                        onChange={() => toggleColumn(column.key)} 
+                        className="h-4 w-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500"
+                      />
+                      <span>{column.label}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            
+            <button 
+              type="button"
+              onClick={handleAddRole} 
+              className="rounded-xl bg-[#2ad072] px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-600 transition shadow-sm"
+            >
+              Agregar Cargo
+            </button>
+          </div>
+        </div>
+
+        {/* METADATOS DE PAGINACIÓN RÁPIDA */}
+        <div className="flex items-center justify-between text-sm text-slate-500 flex-shrink-0 font-medium">
+          <span>{visibleRoles.length} resultados</span>
+          <label className="flex items-center gap-2">
+            Filas por página:
+            <select
+              value={String(rowsPerPage)}
+              onChange={(event) => {
+                setRowsPerPage(Number(event.target.value));
+                setPage(1);
+              }}
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-slate-700 font-medium outline-none"
+            >
+              <option value="5">5</option>
+              <option value="10">10</option>
+              <option value="20">20</option>
+            </select>
           </label>
         </div>
 
-        {error ? <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
-      </div>
-
-      {/* CONTENEDOR CON SCROLL PARA LA GRILLA DE PERMISOS */}
-      <div className="mt-6 flex-1 overflow-y-auto pr-2 space-y-6 scrollbar-thin scrollbar-thumb-slate-200">
-        {sections.map((sect) => (
-          <div key={sect.category} className="overflow-hidden rounded-xl border border-slate-100 bg-white shadow-sm">
-            
-            {/* HEADER DE LA CATEGORÍA */}
-            <div className="bg-slate-100 px-4 py-2 text-center text-xs font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">
-              {sect.category}
-            </div>
-
-            {/* TABLA DE DETALLES */}
-            <table className="min-w-full table-fixed text-sm">
-              <thead>
-                <tr className="border-b border-slate-100 text-center text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50/50">
-                  <th className="w-[45%] px-4 py-2 text-left font-semibold">MÓDULO / RUTA</th>
-                  <th className="w-[11%] py-2 font-semibold">LEER</th>
-                  <th className="w-[11%] py-2 font-semibold">CREAR</th>
-                  <th className="w-[11%] py-2 font-semibold">ACTUALIZAR</th>
-                  <th className="w-[11%] py-2 font-semibold">BORRAR</th>
-                  <th className="w-[11%] py-2 font-semibold">ACCIONES</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {sect.items.map((item) => {
-                  const isChild = item.parent !== "/" && item.parent !== "mobile-root";
-                  const perm = permissions[item.id] || { read: false, create: false, update: false, delete: false, microroles: {} };
-                  const isExpanded = !!expandedModules[item.id];
-                  const moduleMicros = customMicroRoles[item.id] || [];
-                  const hasChildren = activeModules.some((m) => m.parent === item.id);
-
-                  return (
-                    <Fragment key={item.id}>
-                      <tr className="hover:bg-slate-50/50 transition duration-150">
-                        <td className={`px-4 py-3 text-slate-700 flex items-center gap-2 ${isChild ? "pl-8 text-xs text-slate-500" : "font-semibold"}`}>
-                          {!isChild && renderModuleIcon(item.icon)}
-                          <span>{item.name}</span>
-                          <span className="text-[10px] text-slate-400 font-mono">({item.route})</span>
+        {/* TABLA PRINCIPAL DE CARGOS */}
+        <div className="flex-1 overflow-auto rounded-2xl border border-slate-200 min-h-0 bg-white">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-100/80 text-left text-slate-500 font-semibold sticky top-0 z-10 border-b border-slate-200 select-none">
+              <tr>
+                {headerColumns.map((column) => (
+                  <th key={column.key} className={`px-4 py-3 ${column.key === "actions" ? "text-center" : ""}`}>
+                    {column.key !== "actions" ? (
+                      <button 
+                        type="button"
+                        className="font-semibold text-slate-500 hover:text-slate-700 transition" 
+                        onClick={() => setSort(column.key as keyof RoleRecord)}
+                      >
+                        {column.label} {sortBy === column.key && (sortDir === "asc" ? " ▲" : " ▼")}
+                      </button>
+                    ) : (
+                      column.label
+                    )}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {pagedRoles.map((item) => (
+                <tr key={item.id} className="hover:bg-slate-50/50 transition duration-150">
+                  {headerColumns.map((column) => {
+                    if (column.key === "key_id") {
+                      return <td key={`${item.id}-key_id`} className="px-4 py-3.5 font-mono font-bold text-slate-600">{item.key_id}</td>;
+                    }
+                    if (column.key === "name") {
+                      return <td key={`${item.id}-name`} className="px-4 py-3.5 font-semibold text-slate-700">{item.name}</td>;
+                    }
+                    if (column.key === "description") {
+                      return <td key={`${item.id}-description`} className="px-4 py-3.5 max-w-[280px] truncate text-slate-500" title={item.description || ""}>{item.description ?? "-"}</td>;
+                    }
+                    if (column.key === "scope") {
+                      return (
+                        <td key={`${item.id}-scope`} className="px-4 py-3.5">
+                          <span className="rounded-xl bg-purple-50 border border-purple-100 px-2.5 py-1 text-2xs font-bold text-[#9b5de5] uppercase tracking-wider">
+                            {item.scope}
+                          </span>
                         </td>
-                        
-                        {/* CHECKBOXES DE PERMISOS */}
-                        {(["read", "create", "update", "delete"] as Array<"read" | "create" | "update" | "delete">).map((type) => (
-                          <td key={type} className="py-3 text-center">
-                            <button
-                              type="button"
-                              disabled={!isEditing}
-                              onClick={() => handleCheckboxChange(item.id, type)}
-                              className={`inline-flex h-5 w-5 items-center justify-center rounded-md border text-white transition focus:outline-none ${
-                                perm[type]
-                                  ? "bg-[#9b5de5] border-[#9b5de5] shadow-sm shadow-purple-200"
-                                  : "border-slate-200 hover:border-slate-300 bg-white"
-                              } ${!isEditing ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
-                            >
-                              {perm[type] && (
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="h-3 w-3">
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                                </svg>
-                              )}
-                            </button>
-                          </td>
-                        ))}
-
-                        {/* BOTÓN PARA DESPLEGAR MICROROLES */}
-                        <td className="py-3 text-center">
-                          {!hasChildren ? (
-                            <button
-                              type="button"
-                              onClick={() => toggleExpand(item.id)}
-                              className={`rounded-xl px-3 py-1 text-xs font-semibold border transition duration-150 ${
-                                isExpanded 
-                                  ? "bg-white text-purple-600 border-purple-600 font-bold shadow-sm shadow-purple-50" 
-                                  : "bg-white hover:bg-slate-50 text-slate-500 border-slate-200"
-                              }`}
-                            >
-                              {isExpanded ? "Ocultar" : "Microroles"}
-                            </button>
+                      );
+                    }
+                    if (column.key === "permissions_count") {
+                      const count = Object.values(item.permissions || {}).filter(p => (p.status ?? 'active') === 'active').length;
+                      return (
+                        <td key={`${item.id}-permissions_count`} className="px-4 py-3.5 font-medium text-slate-600">
+                          <span className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 border border-blue-100">
+                            <span className="h-1.5 w-1.5 rounded-full bg-blue-500"></span>
+                            {count} {count === 1 ? 'permiso' : 'permisos'}
+                          </span>
+                        </td>
+                      );
+                    }
+                    if (column.key === "integrity") {
+                      const isVulnerada = item.integrityStatus === "vulnerada";
+                      return (
+                        <td key={`${item.id}-integrity`} className="px-4 py-3.5 font-medium">
+                          {isVulnerada ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-lg bg-rose-50 px-2.5 py-1 text-xs font-bold text-rose-600 border border-rose-100 animate-pulse">
+                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor" className="h-3.5 w-3.5 shrink-0 text-rose-500">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                              </svg>
+                              VULNERADA
+                            </span>
                           ) : (
-                            <span className="text-slate-300 font-medium" title="Módulo contenedor (embebido)">—</span>
+                            <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 border border-emerald-100">
+                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor" className="h-3.5 w-3.5 shrink-0 text-emerald-500">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                              </svg>
+                              Completa
+                            </span>
                           )}
                         </td>
-                      </tr>
+                      );
+                    }
+                    return (
+                      <td key={`${item.id}-actions`} className="px-4 py-3.5 text-center">
+                        <div className="flex items-center justify-center gap-2">
 
-                      {/* LISTADO DE MICROROLES DESPLEGABLE */}
-                      {isExpanded && !hasChildren && (
-                        <tr className="bg-slate-50/50">
-                          <td colSpan={6} className="px-6 py-4 border-t border-slate-100/60">
-                            <div className="flex flex-col gap-3">
-                              <div className="flex items-center gap-2">
-                                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
-                                  <span>Microroles / Acciones de {item.name.toUpperCase()}</span>
-                                  {isEditing && (
-                                    <button
-                                      type="button"
-                                      onClick={() => openCreateModal(item.id, item.name)}
-                                      className="flex h-5 w-5 items-center justify-center rounded-full bg-[#1e293b] hover:bg-[#334155] text-white transition duration-150 shadow-sm border border-slate-700"
-                                      title="Agregar nuevo microrol"
-                                    >
-                                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                                        <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-                                      </svg>
-                                    </button>
-                                  )}
-                                </h4>
-                              </div>
+                          {/* Configurar Permisos o Reparar */}
+                          {item.integrityStatus === "vulnerada" ? (
+                            <button
+                              type="button"
+                              onClick={() => handleRepairRole(item)}
+                              className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-100 hover:border-rose-300 transition duration-150 shadow-sm whitespace-nowrap animate-pulse"
+                            >
+                              🛠️ Reparar
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleEditPermissions(item)}
+                              className="rounded-xl border border-purple-200 bg-purple-50 px-4 py-1.5 text-xs font-semibold text-[#9b5de5] hover:bg-purple-100 hover:border-purple-300 transition duration-150 shadow-sm whitespace-nowrap"
+                            >
+                              Ver permisos
+                            </button>
+                          )}
 
-                              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
-                                {moduleMicros.map((micro) => {
-                                  const isGranted = !!(perm.microroles?.[micro.key]);
-                                  return (
-                                    <div 
-                                      key={micro.key} 
-                                      className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-2.5 text-xs font-medium shadow-sm hover:bg-slate-50 transition gap-2 group"
-                                    >
-                                      <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
-                                        <input
-                                          type="checkbox"
-                                          disabled={!isEditing}
-                                          checked={isGranted}
-                                          onChange={() => handleMicroRoleToggle(item.id, micro.key)}
-                                          className="h-4 w-4 rounded border-slate-300 text-[#9b5de5] focus:ring-[#9b5de5] cursor-pointer"
-                                        />
-                                        <span className="text-slate-700 truncate">{micro.label}</span>
-                                      </label>
-                                      
-                                      {isEditing && (
-                                        <div className="flex items-center gap-1.5 flex-shrink-0">
-                                          {/* EDIT BUTTON */}
-                                          <div className="group relative">
-                                            <button
-                                              type="button"
-                                              onClick={() => openEditModal(item.id, micro.key, micro.label)}
-                                              className="flex h-7 w-7 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 shadow-sm hover:bg-blue-100 hover:border-blue-300 hover:text-blue-700 transition duration-150"
-                                            >
-                                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125" />
-                                              </svg>
-                                            </button>
-                                            <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2 py-0.5 text-[10px] font-semibold text-slate-700 shadow-md whitespace-nowrap">
-                                              Editar
-                                            </span>
-                                          </div>
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              {pagedRoles.length === 0 ? (
+                <tr>
+                  <td colSpan={headerColumns.length} className="px-4 py-8 text-center text-slate-400 italic">No hay cargos que coincidan con los filtros de búsqueda.</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
 
-                                          {/* DELETE BUTTON */}
-                                          <div className="group relative">
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                showConfirm(
-                                                  "¿Eliminar microrol?",
-                                                  `¿Seguro que deseas eliminar el microrol "${micro.label}"?`,
-                                                  () => {
-                                                    setCustomMicroRoles((prev) => {
-                                                      const list = prev[item.id] || [];
-                                                      return {
-                                                        ...prev,
-                                                        [item.id]: list.filter((it) => it.key !== micro.key)
-                                                      };
-                                                    });
-                                                  },
-                                                  "Eliminar",
-                                                  "danger"
-                                                );
-                                              }}
-                                              className="flex h-7 w-7 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 shadow-sm hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 transition duration-150"
-                                            >
-                                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="w-3.5 h-3.5">
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                                              </svg>
-                                            </button>
-                                            <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2 py-0.5 text-[10px] font-semibold text-slate-700 shadow-md whitespace-nowrap">
-                                              Eliminar
-                                            </span>
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                                {moduleMicros.length === 0 && (
-                                  <p className="text-xs text-slate-400 italic">No hay microroles de negocio definidos. Agrega uno nuevo en modo edición.</p>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
+        {/* CONTROLADORES DE PAGINACIÓN */}
+        <div className="flex flex-col items-start justify-between gap-3 text-sm text-slate-500 sm:flex-row sm:items-center flex-shrink-0 pt-2">
+          <p>Mostrando {pagedRoles.length} de {visibleRoles.length} cargos</p>
+          <div className="flex items-center gap-2 select-none font-semibold">
+            <button 
+              type="button" 
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))} 
+              disabled={safePage <= 1} 
+              className="rounded-xl border border-slate-200 px-4 py-1.5 hover:bg-slate-50 disabled:opacity-40 transition"
+            >
+              Anterior
+            </button>
+            <span className="rounded-xl bg-[#9b5de5] px-3.5 py-1.5 text-white font-bold">{safePage}</span>
+            <span>de {totalPages}</span>
+            <button 
+              type="button" 
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} 
+              disabled={safePage >= totalPages} 
+              className="rounded-xl border border-slate-200 px-4 py-1.5 hover:bg-slate-50 disabled:opacity-40 transition"
+            >
+              Siguiente
+            </button>
           </div>
-        ))}
+        </div>
+
       </div>
+
+      {/* DRAWER LATERAL DE CREACIÓN / EDICIÓN DE CARGO */}
+      {drawerOpen && (
+        <div className="fixed inset-0 z-50">
+          <div
+            className={`absolute inset-0 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 ${drawerVisible ? "opacity-100" : "opacity-0"}`}
+            onClick={closeDrawer}
+          />
+          <aside
+            className={`absolute right-0 top-0 h-full w-full max-w-[480px] overflow-y-auto bg-white shadow-2xl transition-transform duration-220 ease-out flex flex-col ${
+              drawerVisible ? "translate-x-0" : "translate-x-full"
+            }`}
+          >
+            {/* HEADER DEL DRAWER */}
+            <div className="flex items-start justify-between border-b border-slate-100 px-6 py-5 bg-slate-50/60 flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#9b5de5] to-[#743eb3] text-white shadow-md shadow-purple-200">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800 leading-tight">
+                    {editingRoleId ? "Editar Cargo" : "Nuevo Cargo"}
+                  </h3>
+                  <p className="text-xs text-slate-400 font-medium mt-0.5">
+                    {editingRoleId ? "Modifica los datos del cargo seleccionado" : "Crea un nuevo cargo con persistencia en la base de datos"}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeDrawer}
+                className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition mt-1"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* CUERPO DEL FORMULARIO */}
+            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
+
+              {/* ID Clave */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                  ID Clave <span className="text-rose-400">*</span>
+                  <span className="ml-1 normal-case text-slate-400 font-normal">(máx. 5 caracteres, ej: VEN)</span>
+                </label>
+                <input
+                  type="text"
+                  value={drawerForm.key_id}
+                  disabled={!!editingRoleId}
+                  onChange={(e) => setDrawerForm((s) => ({ ...s, key_id: e.target.value.toUpperCase().slice(0, 5) }))}
+                  placeholder="Ej: ADM"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-mono font-bold text-slate-700 outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 focus:bg-white transition disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                />
+                {drawerErrors.key_id ? <p className="mt-1 text-xs text-rose-600">{drawerErrors.key_id}</p> : null}
+              </div>
+
+              {/* Nombre */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                  Nombre del Cargo <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={drawerForm.name}
+                  onChange={(e) => setDrawerForm((s) => ({ ...s, name: e.target.value }))}
+                  placeholder="Ej: Vendedor de Mostrador"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 focus:bg-white transition"
+                  autoFocus={!editingRoleId}
+                />
+                {drawerErrors.name ? <p className="mt-1 text-xs text-rose-600">{drawerErrors.name}</p> : null}
+              </div>
+
+              {/* Alcance */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                  Alcance (Scope) <span className="text-rose-400">*</span>
+                </label>
+                <select
+                  value={drawerForm.scope}
+                  onChange={(e) => setDrawerForm((s) => ({ ...s, scope: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 focus:bg-white transition"
+                >
+                  <option value="User">User — Usuario estándar</option>
+                  <option value="Admin">Admin — Administrador</option>
+                  <option value="SU">SU — Super Admin</option>
+                </select>
+                {drawerErrors.scope ? <p className="mt-1 text-xs text-rose-600">{drawerErrors.scope}</p> : null}
+              </div>
+
+              {/* Descripción */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                  Descripción
+                  <span className="ml-1 normal-case text-slate-400 font-normal">(opcional)</span>
+                </label>
+                <textarea
+                  value={drawerForm.description}
+                  onChange={(e) => setDrawerForm((s) => ({ ...s, description: e.target.value }))}
+                  placeholder="Describe brevemente las responsabilidades de este cargo..."
+                  rows={4}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 focus:bg-white transition resize-none"
+                />
+              </div>
+
+              {!editingRoleId && (
+                <p className="rounded-xl border border-purple-100 bg-purple-50 px-4 py-3 text-xs text-purple-700 font-medium leading-relaxed">
+                  <strong>💡 Tip:</strong> Al crear el cargo, se abrirá automáticamente la matriz de permisos para que puedas configurarla de inmediato.
+                </p>
+              )}
+            </div>
+
+            {/* FOOTER DEL DRAWER */}
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4 bg-slate-50/60 flex-shrink-0">
+              <button
+                type="button"
+                onClick={closeDrawer}
+                className="rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-5 py-2.5 text-sm font-semibold text-slate-600 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void onSubmitRoleForm()}
+                className="rounded-xl bg-gradient-to-r from-[#9b5de5] to-[#743eb3] hover:from-[#864cc7] hover:to-[#632f9e] px-6 py-2.5 text-sm font-bold text-white transition shadow-md shadow-purple-100 hover:shadow-purple-200 disabled:opacity-50 active:scale-[0.98] transform"
+              >
+                {saving ? "Guardando..." : editingRoleId ? "Guardar Cambios" : "Crear Cargo"}
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* MODAL DE MATRIZ DE PERMISOS */}
+      {permissionsModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-md" onClick={() => { if (!saving) setPermissionsModalOpen(false); }} />
+          
+          <div className="relative bg-white rounded-2xl border border-slate-100 shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200">
+            
+            {/* ENCABEZADO */}
+            <div className="flex items-center justify-between border-b border-slate-100 p-5 bg-slate-50/50 flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#9b5de5] to-[#743eb3] text-white shadow-md shadow-purple-200">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-3.81-.318-7.532-.902-9.136A11.959 11.959 0 0 1 12 2.714Z" />
+                  </svg>
+                </div>
+                <div className="text-left">
+                  <h3 className="text-base font-bold text-slate-800 leading-tight">
+                    Matriz de Permisos: {roleForm.name || "Cargo"}
+                  </h3>
+                  <span className="text-xs text-slate-400 font-medium mt-0.5 block">
+                    {roleForm.description || "Sin descripción"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {isEditing ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 border border-emerald-200 animate-pulse">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    Modo Edición
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 border border-slate-200">
+                    <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                    Modo Lectura
+                  </span>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setPermissionsModalOpen(false)}
+                  className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition"
+                  title="Cerrar"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* CUERPO (CON SCROLL) */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-slate-200 bg-slate-50/30">
+              {sections.map((sect) => (
+                <div key={sect.category} className="overflow-hidden rounded-xl border border-slate-100 bg-white shadow-sm">
+                  
+                  {/* HEADER DE LA CATEGORÍA */}
+                  <div className="bg-slate-100 px-4 py-2 text-center text-xs font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">
+                    {sect.category}
+                  </div>
+
+                  {/* TABLA DE DETALLES */}
+                  <table className="min-w-full table-fixed text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-center text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50/50">
+                        <th className="w-[45%] px-4 py-2 text-left font-semibold">MÓDULO / RUTA</th>
+                        <th className="w-[11%] py-2 font-semibold">LEER</th>
+                        <th className="w-[11%] py-2 font-semibold">CREAR</th>
+                        <th className="w-[11%] py-2 font-semibold">ACTUALIZAR</th>
+                        <th className="w-[11%] py-2 font-semibold">BORRAR</th>
+                        <th className="w-[11%] py-2 font-semibold">ACCIONES</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {sect.items.map((item) => {
+                        const isChild = item.parent !== "/" && item.parent !== "mobile-root";
+                        const perm = permissions[item.id] || { read: false, create: false, update: false, delete: false, microroles: {} };
+                        const isExpanded = !!expandedModules[item.id];
+                        const moduleMicros = customMicroRoles[item.id] || [];
+                        const hasChildren = activeModules.some((m) => m.parent === item.id);
+
+                        if (item.content === "section") {
+                          return (
+                            <Fragment key={item.id}>
+                              <tr className="bg-slate-100/70 border-y border-slate-200/50 transition duration-150">
+                                <td colSpan={6} className="px-4 py-0.5 text-center select-none text-xs font-bold uppercase tracking-wider text-slate-500">
+                                  {item.name}
+                                </td>
+                              </tr>
+                            </Fragment>
+                          );
+                        }
+
+                        return (
+                          <Fragment key={item.id}>
+                            <tr className="hover:bg-slate-50/50 transition duration-150">
+                              <td className={`px-4 py-3 text-slate-700 flex items-center gap-2 ${isChild ? "pl-8 text-xs text-slate-500" : "font-semibold"}`}>
+                                {!isChild && renderModuleIcon(item.icon)}
+                                <span>{item.name}</span>
+                                <span className="text-[10px] text-slate-400 font-mono">({item.route})</span>
+                              </td>
+                              
+                              {/* CHECKBOXES DE PERMISOS */}
+                              {(["read", "create", "update", "delete"] as Array<"read" | "create" | "update" | "delete">).map((type) => (
+                                <td key={type} className="py-3 text-center">
+                                  <button
+                                    type="button"
+                                    disabled={!isEditing}
+                                    onClick={() => handleCheckboxChange(item.id, type)}
+                                    className={`inline-flex h-5 w-5 items-center justify-center rounded-md border text-white transition focus:outline-none ${
+                                      perm[type]
+                                        ? "bg-[#9b5de5] border-[#9b5de5] shadow-sm shadow-purple-200"
+                                        : "border-slate-200 hover:border-slate-300 bg-white"
+                                    } ${!isEditing ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
+                                  >
+                                    {perm[type] && (
+                                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="h-3 w-3">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                      </svg>
+                                    )}
+                                  </button>
+                                </td>
+                              ))}
+
+                              {/* BOTÓN PARA DESPLEGAR ACCIONES */}
+                              <td className="py-3 text-center">
+                                {!hasChildren ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleExpand(item.id)}
+                                    className={`relative rounded-xl px-3 py-1 text-xs font-semibold border transition duration-150 ${
+                                      isExpanded 
+                                        ? "bg-white text-purple-600 border-purple-600 font-bold shadow-sm shadow-purple-50" 
+                                        : "bg-white hover:bg-slate-50 text-slate-500 border-slate-200"
+                                    }`}
+                                  >
+                                    {isExpanded ? "Ocultar" : "Acciones"}
+                                    {(() => {
+                                      const rawActions = Array.isArray(item.actions) ? item.actions : [];
+                                      const activeOrDepCount = rawActions.filter((act: any) => (act.status ?? 'active') === 'active' || act.status === 'deprecated').length;
+                                      if (activeOrDepCount === 0) return null;
+                                      return (
+                                        <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-purple-600 px-1 text-[8px] font-bold text-white shadow-sm ring-2 ring-white">
+                                          {activeOrDepCount}
+                                        </span>
+                                      );
+                                    })()}
+                                  </button>
+                                ) : (
+                                  <span className="text-slate-300 font-medium" title="Módulo contenedor (embebido)">—</span>
+                                )}
+                              </td>
+                            </tr>
+
+                            {/* LISTADO DE ACCIONES DESPLEGABLE */}
+                            {isExpanded && !hasChildren && (
+                              <tr className="bg-slate-50/50">
+                                <td colSpan={6} className="px-6 py-4 border-t border-slate-100/60">
+                                  <div className="flex flex-col gap-3">
+                                    <div className="flex items-center gap-2">
+                                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                                        <span>Acciones de {item.name.toUpperCase()}</span>
+                                      </h4>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
+                                      {(() => {
+                                        const rawActions = Array.isArray(item.actions) ? item.actions : [];
+                                        const moduleMicros = rawActions.filter((act: any) => (act.status ?? 'active') === 'active' || act.status === 'deprecated');
+                                        
+                                        if (moduleMicros.length === 0) {
+                                          return (
+                                            <p className="text-xs text-slate-400 italic col-span-full">No hay acciones de negocio definidas.</p>
+                                          );
+                                        }
+
+                                        return moduleMicros.map((micro: any) => {
+                                          const key = micro.id || micro.key;
+                                          const isGranted = !!(perm.microroles?.[key]);
+                                          const isDeprecated = micro.status === "deprecated";
+
+                                          return (
+                                            <div 
+                                              key={key} 
+                                              className={`flex items-center justify-between rounded-xl border p-2.5 text-xs font-medium shadow-sm transition gap-2 group text-left ${
+                                                isDeprecated 
+                                                  ? "border-amber-200 bg-amber-50/20 hover:bg-amber-50/30" 
+                                                  : "border-slate-200 bg-white hover:bg-slate-50"
+                                              }`}
+                                            >
+                                              <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
+                                                <input
+                                                  type="checkbox"
+                                                  disabled={!isEditing}
+                                                  checked={isGranted}
+                                                  onChange={() => handleMicroRoleToggle(item.id, key)}
+                                                  className="h-4 w-4 rounded border-slate-300 text-[#9b5de5] focus:ring-[#9b5de5] cursor-pointer"
+                                                />
+                                                <span className="text-slate-700 truncate flex items-center gap-1.5">
+                                                  {micro.label}
+                                                  {isDeprecated && (
+                                                    <span className="text-amber-500 font-bold" title="Acción Deprecada (Warning)">⚠️</span>
+                                                  )}
+                                                </span>
+                                              </label>
+                                            </div>
+                                          );
+                                        });
+                                      })()}
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+
+            {/* BOTONES DE ACCIÓN EN EL FOOTER DEL MODAL */}
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 p-5 bg-slate-50/50 flex-shrink-0">
+              {!isEditing ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(true)}
+                    className="rounded-xl bg-blue-600 px-6 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-md"
+                  >
+                    Editar Permisos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPermissionsModalOpen(false)}
+                    className="rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-5 py-2 text-sm font-semibold text-slate-600 transition"
+                  >
+                    Cerrar
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(false)}
+                    className="rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-5 py-2 text-sm font-semibold text-slate-600 transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={async () => {
+                      await handleSave();
+                      setPermissionsModalOpen(false);
+                    }}
+                    className="rounded-xl bg-[#2ad072] px-6 py-2 text-sm font-bold text-white hover:bg-emerald-600 disabled:opacity-50 transition shadow-md"
+                  >
+                    {saving ? "Guardando..." : "Guardar Cambios"}
+                  </button>
+                </>
+              )}
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE REPARACIÓN DE CARGO (INTEGRIDAD VULNERADA) */}
+      {repairModalOpen && repairRoleItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-md" onClick={() => { if (!repairLoading) setRepairModalOpen(false); }} />
+          
+          <div className="relative bg-white rounded-3xl border border-slate-100 shadow-2xl w-full max-w-2xl overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[85vh]">
+            
+            {/* ENCABEZADO */}
+            <div className="flex items-center justify-between border-b border-slate-100 p-6 bg-rose-50/50 flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-500 to-red-600 text-white shadow-lg shadow-rose-200">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor" className="w-6 h-6 animate-pulse">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                  </svg>
+                </div>
+                <div className="text-left">
+                  <h3 className="text-lg font-extrabold text-slate-800 leading-tight">
+                    Reparar Integridad del Cargo
+                  </h3>
+                  <span className="text-xs text-rose-500 font-semibold mt-0.5 block">
+                    Cargo: {repairRoleItem.name} ({repairRoleItem.key_id})
+                  </span>
+                </div>
+              </div>
+              
+              <button
+                type="button"
+                onClick={() => setRepairModalOpen(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition"
+                title="Cerrar"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* CONTENIDO DEL MODAL */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {headers["x-actor-role"] !== "SU" ? (
+                /* BANNER PREMIUM DE ACCESO DENEGADO PARA NO-SU */
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center space-y-4 shadow-sm">
+                  <div className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-red-100 text-red-600 mb-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-8 w-8">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+                    </svg>
+                  </div>
+                  <h4 className="text-lg font-bold text-red-800">Acceso Altamente Restringido</h4>
+                  <p className="text-sm text-red-600 max-w-md mx-auto leading-relaxed">
+                    Se ha detectado una alteración no autorizada de privilegios (Vulneración criptográfica). La reparación de firmas y consistencia de base de datos está restringida **exclusivamente a Super Usuarios (SU)** del sistema.
+                  </p>
+                  <p className="text-xs text-red-400 font-semibold">
+                    Por favor, póngase en contacto con el administrador de seguridad informática.
+                  </p>
+                </div>
+              ) : (
+                /* ACCIONES PARA SUPER USUARIO (SU) */
+                <div className="space-y-6">
+                  {repairError && (
+                    <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600 font-medium">
+                      ❌ {repairError}
+                    </div>
+                  )}
+
+                  {!repairResult ? (
+                    <>
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-5 leading-relaxed space-y-2">
+                        <h4 className="text-sm font-bold text-amber-800 flex items-center gap-1.5">
+                          ⚠️ Alerta de Seguridad del Sistema
+                        </h4>
+                        <p className="text-xs text-amber-700">
+                          La firma criptográfica `hashPermission` de este cargo no coincide con el estado actual de los permisos en la base de datos. Esto indica que los registros han sido alterados directamente o de forma ajena a la plataforma.
+                        </p>
+                        <p className="text-xs text-amber-700 font-semibold">
+                          Seleccione uno de los dos métodos oficiales de reparación provistos a continuación:
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* OP-1: RESTAURAR DESDE BACKUP CIFRADO */}
+                        <button
+                          type="button"
+                          onClick={() => handleExecuteRepair("restore")}
+                          disabled={repairLoading}
+                          className="flex flex-col text-left p-5 rounded-2xl border border-slate-200 hover:border-purple-300 hover:bg-purple-50/20 transition group active:scale-[0.98] transform duration-150"
+                        >
+                          <div className="h-10 w-10 rounded-xl bg-purple-50 text-[#9b5de5] flex items-center justify-center font-bold mb-3 shadow-sm border border-purple-100 group-hover:bg-purple-600 group-hover:text-white transition duration-150">
+                            🛡️
+                          </div>
+                          <span className="text-sm font-bold text-slate-800 group-hover:text-purple-700 transition">
+                            Restaurar desde Backup
+                          </span>
+                          <span className="text-2xs text-slate-500 mt-1 leading-relaxed">
+                            Recupera la copia de seguridad guardada y cifrada con AES-256-CBC, realiza un análisis de discrepancias, sobrescribe los permisos alterados y genera un reporte oficial de auditoría.
+                          </span>
+                        </button>
+
+                        {/* OP-2: CONFIGURAR DESDE CERO */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            showConfirm(
+                              "¿Configurar desde Cero?",
+                              "Esta opción revocará y eliminará por completo todos los permisos activos y copias de seguridad de este cargo, restableciéndolo a un estado vacío. ¿Deseas proceder?",
+                              () => handleExecuteRepair("scratch"),
+                              "Restablecer a Cero",
+                              "danger"
+                            );
+                          }}
+                          disabled={repairLoading}
+                          className="flex flex-col text-left p-5 rounded-2xl border border-slate-200 hover:border-rose-300 hover:bg-rose-50/20 transition group active:scale-[0.98] transform duration-150"
+                        >
+                          <div className="h-10 w-10 rounded-xl bg-rose-50 text-rose-500 flex items-center justify-center font-bold mb-3 shadow-sm border border-rose-100 group-hover:bg-rose-600 group-hover:text-white transition duration-150">
+                            🧹
+                          </div>
+                          <span className="text-sm font-bold text-slate-800 group-hover:text-rose-700 transition">
+                            Configurar desde Cero
+                          </span>
+                          <span className="text-2xs text-slate-500 mt-1 leading-relaxed">
+                            Limpia y depura completamente cualquier configuración corrupta existente en la base de datos para este cargo, permitiendo la asignación manual y limpia desde el principio.
+                          </span>
+                        </button>
+                      </div>
+
+                      {repairLoading && (
+                        <div className="flex flex-col items-center justify-center py-6 gap-3">
+                          <div className="h-8 w-8 animate-spin rounded-full border-4 border-purple-500 border-t-transparent" />
+                          <span className="text-xs font-semibold text-purple-600 animate-pulse">
+                            Ejecutando operaciones de recuperación y validación criptográfica...
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    /* REPORTE DE AUDITORÍA Y DISCREPANCIAS */
+                    <div className="space-y-5 animate-in fade-in duration-200">
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 flex items-start gap-3">
+                        <div className="h-8 w-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                          ✓
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-emerald-800">
+                            Reparación Completada Exitosamente
+                          </h4>
+                          <p className="text-xs text-emerald-700 mt-1">
+                            Se ha reestablecido la integridad de los permisos y se ha vuelto a firmar digitalmente el cargo en la base de datos.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          Reporte de Discrepancias Neutralizadas
+                        </span>
+                        <div className="rounded-2xl border border-slate-200 bg-slate-950 text-slate-100 p-4 font-mono text-xs leading-relaxed max-h-[300px] overflow-y-auto whitespace-pre-wrap">
+                          {repairResult.report}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl bg-slate-50 border border-slate-100 p-3.5 text-2xs text-slate-500 leading-normal">
+                        <strong>🛡️ Nota de Auditoría:</strong> El reporte completo de diferencias detectadas ha sido registrado permanentemente en la tabla `audit_logs` con la acción de auditoría `"repair_audit_report"`.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* PIE DEL MODAL */}
+            <div className="flex items-center justify-end border-t border-slate-100 p-5 bg-slate-50/50 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setRepairModalOpen(false);
+                  setRepairResult(null);
+                  setRepairError("");
+                }}
+                disabled={repairLoading}
+                className="rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-5 py-2.5 text-sm font-semibold text-slate-600 transition"
+              >
+                Cerrar
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* MODAL PERSONALIZADO Y ESTILIZADO */}
       {modalOpen && (
@@ -910,7 +1730,7 @@ export function DynamicComponent() {
               </div>
               <div className="flex flex-col min-w-0">
                 <h3 className="text-base font-bold text-slate-800 leading-tight">
-                  {modalType === "create" ? "Nuevo Microrol" : "Editar Microrol"}
+                  {modalType === "create" ? "Nueva Acción" : "Editar Acción"}
                 </h3>
                 <span className="text-xs text-slate-400 font-medium truncate">
                   {modalType === "create" ? `Módulo: ${modalModuleName}` : "Actualizar acción"}
@@ -933,7 +1753,7 @@ export function DynamicComponent() {
             <div className="flex flex-col gap-4">
               <p className="text-xs text-slate-500 leading-relaxed">
                 {modalType === "create" 
-                  ? "Las acciones o microroles te permiten definir permisos ultra-específicos de negocio para este módulo de manera dinámica."
+                  ? "Las acciones te permiten definir permisos ultra-específicos de negocio para este módulo de manera dinámica."
                   : "Modifica el nombre de la acción seleccionada. Los cambios se aplicarán de inmediato en la grilla de control."}
               </p>
 
@@ -1006,6 +1826,54 @@ export function DynamicComponent() {
           </div>
         </div>
       ) : null}
+
+      {/* Toasts Container */}
+      <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[999] flex flex-col gap-2 max-w-md w-full pointer-events-none items-center px-4">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`flex items-start gap-3 p-4 rounded-xl shadow-lg border transition-all duration-300 pointer-events-auto transform translate-y-0 ${
+              toast.type === "success"
+                ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                : toast.type === "warning"
+                ? "bg-amber-50 border-amber-200 text-amber-800"
+                : toast.type === "info"
+                ? "bg-blue-50 border-blue-200 text-blue-800"
+                : "bg-rose-50 border-rose-200 text-rose-800"
+            }`}
+          >
+            {toast.type === "success" && (
+              <svg className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            {toast.type === "warning" && (
+              <svg className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            )}
+            {toast.type === "info" && (
+              <svg className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            {toast.type === "error" && (
+              <svg className="h-5 w-5 text-rose-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            <div className="flex-1 text-sm font-medium">{toast.message}</div>
+            <button
+              onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+              className="text-slate-400 hover:text-slate-600 transition shrink-0"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }

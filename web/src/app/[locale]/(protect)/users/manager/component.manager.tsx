@@ -2,13 +2,26 @@
 
 import {useCallback, useEffect, useMemo, useState} from "react";
 
-const DEFAULT_COLUMNS = ["name", "last_name", "user_email", "phone_number", "status", "actions"];
+const DEFAULT_COLUMNS = ["name", "assigned_role", "phone_number", "status", "actions"];
 
-export function DataManager() {
+export function DataManager({ currentUserEmail, currentUserImage, currentUserProvider, isSU }: { currentUserEmail?: string; currentUserImage?: string; currentUserProvider?: string; isSU?: boolean }) {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [toasts, setToasts] = useState<Array<{
+    id: string;
+    type: "success" | "warning" | "error" | "info";
+    message: string;
+  }>>([]);
+
+  const showToast = useCallback((message: string, type: "success" | "warning" | "error" | "info" = "error") => {
+    const id = `toast-${Date.now()}-${Math.random()}`;
+    setToasts((prev) => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  }, []);
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -19,6 +32,21 @@ export function DataManager() {
   const [saving, setSaving] = useState(false);
   const [actionMode, setActionMode] = useState("add"); // "add" | "edit"
   const [selectedRow, setSelectedRow] = useState<any>(null);
+
+  // Nuevos estados para la gestión relacional de roles y carga de avatar
+  const [rolesList, setRolesList] = useState<any[]>([]);
+  const [assignmentsList, setAssignmentsList] = useState<any[]>([]);
+  const [countriesList, setCountriesList] = useState<any[]>([]);
+  const [selectedRoleId, setSelectedRoleId] = useState<string>("");
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
+  // Estados para la gestión de cambio de contraseña
+  const [showChangePasswordPanel, setShowChangePasswordPanel] = useState(false);
+  const [pwdForm, setPwdForm] = useState({
+    oldPassword: "",
+    newPassword: "",
+    confirmPassword: ""
+  });
 
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -63,13 +91,51 @@ export function DataManager() {
     dni: "",
     gender: "male",
     status: "active",
-    provider: "google",
+    provider: "manual",
     companyId: "900000000",
     country_code: "+57",
     country_iso: "CO",
-    avatar: "101",
-    position: "Staff"
+    avatar: "",
+    position: "Staff",
+    password: "",
+    confirmPassword: ""
   });
+
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    
+    setUploadingAvatar(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/v1/upload", {
+        method: "POST",
+        headers: {
+          Authorization: headers.Authorization,
+          "x-oauth-session": headers["x-oauth-session"],
+          "x-actor-id": headers["x-actor-id"],
+          "x-actor-role": headers["x-actor-role"],
+          "x-company-id": headers["x-company-id"]
+        },
+        body: formData
+      });
+
+      const resBody = await response.json();
+      if (!response.ok) {
+        throw new Error(resBody.message || "Error al subir la imagen");
+      }
+
+      setForm((prev) => ({ ...prev, avatar: resBody.url }));
+      showToast("Imagen de avatar subida exitosamente.", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Error al subir el archivo", "error");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   const headers = useMemo(
     () => ({
@@ -85,9 +151,8 @@ export function DataManager() {
   const allColumns = useMemo(
     () => [
       {key: "id_user_pk", label: "ID Usuario"},
-      {key: "name", label: "Nombre"},
-      {key: "last_name", label: "Apellidos"},
-      {key: "user_email", label: "Correo Electrónico"},
+      {key: "name", label: "Usuario"},
+      {key: "assigned_role", label: "Rol Asignado"},
       {key: "phone_number", label: "Teléfono"},
       {key: "dni", label: "DNI / Cédula"},
       {key: "status", label: "Estado"},
@@ -100,20 +165,51 @@ export function DataManager() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError("");
     try {
-      const response = await fetch("/api/v1/db/users", {headers});
-      const body = await response.json();
-      if (!response.ok) throw new Error(body?.message || "No se pudo cargar la lista de usuarios");
-      const data = Array.isArray(body?.data) ? body.data : [];
-      setRows(data);
+      const [usersRes, rolesRes, assignmentsRes, countriesRes] = await Promise.all([
+        fetch("/api/v1/db/users", { headers }),
+        fetch("/api/v1/db/roles", { headers }),
+        fetch("/api/v1/db/role_assignments", { headers }),
+        fetch("/api/v1/db/st_country", { headers }).catch(() => null)
+      ]);
+
+      const [usersBody, rolesBody, assignmentsBody, countriesBody] = await Promise.all([
+        usersRes.json(),
+        rolesRes.json(),
+        assignmentsRes.json(),
+        countriesRes ? countriesRes.json().catch(() => null) : null
+      ]);
+
+      if (!usersRes.ok) throw new Error(usersBody?.message || "No se pudo cargar la lista de usuarios");
+      
+      const usersData = Array.isArray(usersBody?.data) ? usersBody.data : [];
+      const rolesData = Array.isArray(rolesBody?.data) ? rolesBody.data : [];
+      const assignmentsData = Array.isArray(assignmentsBody?.data) ? assignmentsBody.data : [];
+      
+      let countriesData = countriesBody && Array.isArray(countriesBody?.data) ? countriesBody.data : [];
+      if (countriesData.length === 0) {
+        countriesData = [
+          { prefix_area: "+57", iso: "CO", nombre: "Colombia" },
+          { prefix_area: "+54", iso: "AR", nombre: "Argentina" },
+          { prefix_area: "+56", iso: "CL", nombre: "Chile" },
+          { prefix_area: "+52", iso: "MX", nombre: "México" },
+          { prefix_area: "+51", iso: "PE", nombre: "Perú" },
+          { prefix_area: "+1", iso: "US", nombre: "Estados Unidos" },
+          { prefix_area: "+34", iso: "ES", nombre: "España" }
+        ];
+      }
+
+      setRows(usersData);
+      setRolesList(rolesData);
+      setAssignmentsList(assignmentsData);
+      setCountriesList(countriesData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al cargar datos");
+      showToast(err instanceof Error ? err.message : "Error al cargar datos", "error");
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [headers]);
+  }, [headers, showToast]);
 
   useEffect(() => {
     void load();
@@ -145,7 +241,14 @@ export function DataManager() {
   const headerColumns = useMemo(() => allColumns.filter((column) => visibleColumns.has(column.key)), [allColumns, visibleColumns]);
 
   const setFormField = (fieldName: string, value: string) => {
-    setForm((prev) => ({...prev, [fieldName]: value}));
+    setForm((prev) => {
+      const updated = { ...prev, [fieldName]: value };
+      if (fieldName === "dni" && actionMode === "add" && (!prev.password || prev.password === `${prev.dni}**`)) {
+        updated.password = `${value}**`;
+        updated.confirmPassword = `${value}**`;
+      }
+      return updated;
+    });
   };
 
   const openAddDrawer = () => {
@@ -159,13 +262,16 @@ export function DataManager() {
       dni: "",
       gender: "male",
       status: "active",
-      provider: "google",
+      provider: "manual",
       companyId: "900000000",
       country_code: "+57",
       country_iso: "CO",
-      avatar: "101",
-      position: "Staff"
+      avatar: "",
+      position: "Staff",
+      password: "",
+      confirmPassword: ""
     });
+    setSelectedRoleId("");
     setOpenDrawer(true);
     window.setTimeout(() => setDrawerVisible(true), 10);
   };
@@ -173,6 +279,12 @@ export function DataManager() {
   const openEditDrawer = (row: any) => {
     setActionMode("edit");
     setSelectedRow(row);
+    
+    let initialAvatar = String(row?.avatar || "").trim();
+    if (!initialAvatar && currentUserEmail && String(row?.user_email || "").trim().toLowerCase() === currentUserEmail.toLowerCase()) {
+      initialAvatar = currentUserImage || "";
+    }
+
     setForm({
       user_email: String(row?.user_email || ""),
       name: String(row?.name || ""),
@@ -181,52 +293,161 @@ export function DataManager() {
       dni: String(row?.dni || ""),
       gender: String(row?.gender || "male"),
       status: String(row?.status || "active"),
-      provider: String(row?.provider || "google"),
+      provider: String(row?.provider || "manual"),
       companyId: String(row?.companyId || "900000000"),
       country_code: String(row?.country_code || "+57"),
       country_iso: String(row?.country_iso || "CO"),
-      avatar: String(row?.avatar || "101"),
-      position: String(row?.position || "Staff")
+      avatar: initialAvatar,
+      position: String(row?.position || "Staff"),
+      password: "",
+      confirmPassword: ""
     });
+
+    const currentAssignment = assignmentsList.find((a) => a.platform_user_id === row?.id_user_pk);
+    setSelectedRoleId(currentAssignment ? currentAssignment.roleId : "");
     setOpenDrawer(true);
     window.setTimeout(() => setDrawerVisible(true), 10);
   };
 
   const closeDrawer = () => {
     setDrawerVisible(false);
+    setShowChangePasswordPanel(false);
+    setPwdForm({ oldPassword: "", newPassword: "", confirmPassword: "" });
     window.setTimeout(() => setOpenDrawer(false), 220);
+  };
+
+  const handleChangePassword = async () => {
+    if (!pwdForm.newPassword) {
+      showToast("Ingresa la nueva contraseña.", "warning");
+      return;
+    }
+    if (pwdForm.newPassword !== pwdForm.confirmPassword) {
+      showToast("Las contraseñas nuevas no coinciden.", "warning");
+      return;
+    }
+    
+    try {
+      const response = await fetch("/api/v1/db/users", {
+        method: "PATCH",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({
+          id: String(selectedRow?.id_user_pk || ""),
+          oldPassword: pwdForm.oldPassword,
+          newPassword: pwdForm.newPassword
+        })
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body?.message || "No se pudo actualizar la contraseña");
+      }
+      
+      showToast("Contraseña actualizada exitosamente.", "success");
+      setShowChangePasswordPanel(false);
+      setPwdForm({ oldPassword: "", newPassword: "", confirmPassword: "" });
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Error al cambiar la contraseña", "error");
+    }
   };
 
   const saveItem = async () => {
     const required = [form.user_email, form.name, form.last_name].every((item) => String(item).trim().length > 0);
     if (!required) {
-      setError("Completa Correo Electrónico, Nombre y Apellidos.");
+      showToast("Completa Correo Electrónico, Nombre y Apellidos.", "warning");
       return;
     }
+    if (actionMode === "add" && form.provider === "manual") {
+      if (!form.password) {
+        showToast("Ingresa una contraseña para el acceso manual.", "warning");
+        return;
+      }
+      if (form.password !== form.confirmPassword) {
+        showToast("Las contraseñas no coinciden.", "warning");
+        return;
+      }
+    }
     setSaving(true);
-    setError("");
     try {
+      const selectedRoleName = selectedRoleId ? rolesList.find(r => r.id === selectedRoleId)?.name || "Staff" : "Staff";
+      const updatedForm = { ...form, position: selectedRoleName };
+
+      let savedUser: any = null;
+
       if (actionMode === "edit" && selectedRow) {
+        const userId = String(selectedRow?.id_user_pk || "");
         const response = await fetch("/api/v1/db/users", {
           method: "PATCH",
           headers: {...headers, "content-type": "application/json"},
-          body: JSON.stringify({id: String(selectedRow?.id_user_pk || ""), ...form})
+          body: JSON.stringify({id: userId, ...updatedForm})
         });
         const body = await response.json();
-        if (!response.ok) throw new Error(body?.message || "No se pudo actualizar");
+        if (!response.ok) throw new Error(body?.message || "No se pudo actualizar el perfil del usuario");
+        
+        savedUser = { id_user_pk: userId };
       } else {
         const response = await fetch("/api/v1/db/users", {
           method: "POST",
           headers: {...headers, "content-type": "application/json"},
-          body: JSON.stringify(form)
+          body: JSON.stringify(updatedForm)
         });
         const body = await response.json();
-        if (!response.ok) throw new Error(body?.message || "No se pudo crear");
+        if (!response.ok) throw new Error(body?.message || "No se pudo crear el usuario");
+        
+        savedUser = body.data;
       }
+
+      if (savedUser && savedUser.id_user_pk) {
+        const userId = savedUser.id_user_pk;
+        const currentAssignment = assignmentsList.find(a => a.platform_user_id === userId);
+
+        if (selectedRoleId) {
+          if (!currentAssignment) {
+            const postRes = await fetch("/api/v1/db/role_assignments", {
+              method: "POST",
+              headers: { ...headers, "content-type": "application/json" },
+              body: JSON.stringify({
+                platform_user_id: userId,
+                roleId: selectedRoleId
+              })
+            });
+            if (!postRes.ok) {
+              const errBody = await postRes.json();
+              throw new Error(errBody.message || "Error al crear la asignación de rol");
+            }
+          } else if (currentAssignment.roleId !== selectedRoleId) {
+            const patchRes = await fetch("/api/v1/db/role_assignments", {
+              method: "PATCH",
+              headers: { ...headers, "content-type": "application/json" },
+              body: JSON.stringify({
+                id: currentAssignment.id,
+                roleId: selectedRoleId,
+                platform_user_id: userId
+              })
+            });
+            if (!patchRes.ok) {
+              const errBody = await patchRes.json();
+              throw new Error(errBody.message || "Error al actualizar la asignación de rol");
+            }
+          }
+        } else if (currentAssignment) {
+          const deleteRes = await fetch("/api/v1/db/role_assignments", {
+            method: "DELETE",
+            headers: { ...headers, "content-type": "application/json" },
+            body: JSON.stringify({
+              id: currentAssignment.id
+            })
+          });
+          if (!deleteRes.ok) {
+            const errBody = await deleteRes.json();
+            throw new Error(errBody.message || "Error al remover la asignación de rol");
+          }
+        }
+      }
+
+      showToast(actionMode === "add" ? "Usuario creado exitosamente." : "Usuario actualizado exitosamente.", "success");
       closeDrawer();
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo guardar");
+      showToast(err instanceof Error ? err.message : "No se pudo guardar", "error");
     } finally {
       setSaving(false);
     }
@@ -237,7 +458,6 @@ export function DataManager() {
       "¿Eliminar este usuario?",
       "Esta acción es irreversible y removerá permanentemente al usuario de la plataforma. ¿Deseas continuar?",
       async () => {
-        setError("");
         try {
           const response = await fetch("/api/v1/db/users", {
             method: "DELETE",
@@ -246,9 +466,10 @@ export function DataManager() {
           });
           const body = await response.json();
           if (!response.ok) throw new Error(body?.message || "No se pudo eliminar");
+          showToast("Usuario eliminado exitosamente.", "success");
           await load();
         } catch (err) {
-          setError(err instanceof Error ? err.message : "No se pudo eliminar");
+          showToast(err instanceof Error ? err.message : "No se pudo eliminar", "error");
         }
       },
       "Eliminar",
@@ -276,12 +497,29 @@ export function DataManager() {
     return "bg-rose-50 text-rose-700 border-rose-200";
   };
 
-  const getStatusLabel = (status: string) => {
-    const clean = String(status || "").toLowerCase().trim();
-    if (clean === "active") return "Activo";
-    if (clean === "pending_approval") return "Pendiente";
-    return "Inactivo";
-  };
+  const providerOptions = useMemo(() => {
+    const options = [{ value: "manual", label: "Manual" }];
+    const activeProv = String(currentUserProvider || "").toLowerCase().trim();
+    
+    if (activeProv && activeProv !== "manual" && activeProv !== "credentials") {
+      const label = activeProv.charAt(0).toUpperCase() + activeProv.slice(1);
+      if (!options.some(o => o.value === activeProv)) {
+        options.push({ value: activeProv, label });
+      }
+    }
+    
+    if (actionMode === "edit") {
+      const currentProv = String(form.provider || "manual").toLowerCase().trim();
+      if (currentProv && currentProv !== "manual" && currentProv !== "credentials") {
+        const label = currentProv.charAt(0).toUpperCase() + currentProv.slice(1);
+        if (!options.some(o => o.value === currentProv)) {
+          options.push({ value: currentProv, label });
+        }
+      }
+    }
+    return options;
+  }, [currentUserProvider, form.provider, actionMode]);
+
 
   return (
     <section className="h-full w-full rounded-2xl border border-slate-200 bg-white p-4 text-slate-700 sm:p-5 shadow-sm">
@@ -363,9 +601,8 @@ export function DataManager() {
       </div>
 
       {loading ? <p className="mt-6 text-sm text-slate-500">Cargando usuarios...</p> : null}
-      {!loading && error ? <p className="mt-6 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
 
-      {!loading && !error ? (
+      {!loading ? (
         <>
           <div className="mt-4 overflow-auto rounded-2xl border border-slate-200">
             <table className="min-w-full border-collapse text-sm">
@@ -382,6 +619,56 @@ export function DataManager() {
                     {headerColumns.map((column) => {
                       if (column.key === "id_user_pk") {
                         return <td key={`id-${index}`} className="px-4 py-3 font-mono text-xs text-slate-400">{String(row?.id_user_pk || "").slice(0, 14)}...</td>;
+                      }
+                      if (column.key === "name") {
+                        const avatarUrl = row?.avatar;
+                        let finalAvatarUrl = avatarUrl;
+                        if (!finalAvatarUrl && currentUserEmail && String(row?.user_email || "").trim().toLowerCase() === currentUserEmail.toLowerCase()) {
+                          finalAvatarUrl = currentUserImage;
+                        }
+                        const fullName = `${row?.name || ""} ${row?.last_name || ""}`.trim() || "Usuario sin nombre";
+                        const email = row?.user_email || "Sin correo electrónico";
+                        const initials = fullName.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2) || "?";
+                        const hasImage = finalAvatarUrl && (finalAvatarUrl.startsWith("http://") || finalAvatarUrl.startsWith("https://") || finalAvatarUrl.startsWith("/"));
+
+                        return (
+                          <td key={`name-${index}`} className="px-4 py-3.5">
+                            <div className="flex items-center gap-3">
+                              {hasImage ? (
+                                <img
+                                  src={finalAvatarUrl}
+                                  alt={fullName}
+                                  className="h-9 w-9 rounded-full object-cover border border-slate-100 shadow-sm shrink-0"
+                                />
+                              ) : (
+                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-xs font-bold text-white shadow-sm shadow-blue-100 uppercase">
+                                  {initials}
+                                </div>
+                              )}
+                              <div className="flex flex-col min-w-0">
+                                <span className="font-semibold text-slate-800 leading-tight truncate">{fullName}</span>
+                                <span className="text-2xs text-slate-400 mt-0.5 truncate">{email}</span>
+                              </div>
+                            </div>
+                          </td>
+                        );
+                      }
+                      if (column.key === "assigned_role") {
+                        const assignment = assignmentsList.find((a) => a.platform_user_id === row.id_user_pk);
+                        const role = assignment ? rolesList.find((r) => r.id === assignment.roleId) : null;
+                        
+                        return (
+                          <td key={`role-${index}`} className="px-4 py-3.5">
+                            {role ? (
+                              <span className="inline-flex items-center gap-1.5 rounded-lg bg-purple-50 px-2.5 py-1 text-xs font-semibold text-purple-700 border border-purple-100 shadow-sm">
+                                <span className="h-1.5 w-1.5 rounded-full bg-purple-500"></span>
+                                {role.name}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 italic text-xs font-medium">—</span>
+                            )}
+                          </td>
+                        );
                       }
                       if (column.key === "status") {
                         const statusVal = String(row?.status || "inactive");
@@ -492,6 +779,102 @@ export function DataManager() {
             </div>
 
             <div className="mt-6 border-t border-slate-100 pt-5 space-y-4">
+              
+              {/* TOP HEADER SECTION: 5/12 Avatar | 7/12 DNI & Email */}
+              <div className="grid grid-cols-12 gap-4 items-center">
+                {/* Left Side: Avatar (5/12) */}
+                <div className="col-span-5 flex flex-col items-center justify-center py-2 select-none">
+                  <div 
+                    onClick={() => document.getElementById("avatar-file-input")?.click()}
+                    className="h-24 w-24 rounded-full border-2 border-slate-200 shadow-sm relative overflow-hidden group cursor-pointer bg-slate-50 flex items-center justify-center transition hover:border-blue-400"
+                  >
+                    {form.avatar && (form.avatar.startsWith("http://") || form.avatar.startsWith("https://") || form.avatar.startsWith("/")) ? (
+                      <img
+                        src={form.avatar}
+                        alt="Avatar"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-blue-500 to-indigo-600 text-2xl font-bold text-white uppercase">
+                        {`${form.name || "?"}${form.last_name || "?"}`.trim().split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2) || "?"}
+                      </div>
+                    )}
+
+                    <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition duration-200 flex flex-col items-center justify-center text-white p-1 text-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 mb-0.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
+                      </svg>
+                      <span className="text-[8px] font-extrabold uppercase tracking-wide">Subir Foto</span>
+                    </div>
+
+                    {uploadingAvatar && (
+                      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-[1px] flex items-center justify-center">
+                        <div className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      </div>
+                    )}
+                  </div>
+
+                  <input 
+                    id="avatar-file-input"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAvatarUpload}
+                    className="hidden"
+                  />
+                  <span className="text-[9px] text-slate-400 font-semibold mt-2 text-center leading-tight">
+                    {form.avatar ? "Imagen cargada" : "Haz clic para subir"}
+                  </span>
+
+                  {currentUserImage && form.user_email && form.user_email.toLowerCase() === currentUserEmail?.toLowerCase() && form.avatar !== currentUserImage && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForm(prev => ({ ...prev, avatar: currentUserImage }));
+                        showToast("Se restauró el avatar de tu proveedor.", "info");
+                      }}
+                      className="mt-2 inline-flex items-center gap-1.5 text-[8px] font-normal text-slate-500 hover:text-slate-700 bg-slate-100/60 hover:bg-slate-200/40 border border-slate-200/40 px-2 py-0.5 rounded-full transition select-none cursor-pointer shadow-3xs"
+                    >
+                      {form.provider === "google" && (
+                        <svg className="h-2.5 w-2.5 shrink-0" viewBox="0 0 24 24">
+                          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                        </svg>
+                      )}
+                      <span>Restaurar</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Right Side: DNI & Email (7/12) */}
+                <div className="col-span-7 space-y-3">
+                  <label className="block">
+                    <span className="text-xs font-semibold text-slate-500">DNI / Documento *</span>
+                    <input
+                      value={form.dni}
+                      disabled={actionMode === "edit"}
+                      onChange={(event) => setFormField("dni", event.target.value)}
+                      placeholder="DNI o Cédula"
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white disabled:opacity-50 transition"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="text-xs font-semibold text-slate-500">Correo Electrónico *</span>
+                    <input
+                      type="email"
+                      value={form.user_email}
+                      disabled={actionMode === "edit"}
+                      onChange={(event) => setFormField("user_email", event.target.value)}
+                      placeholder="usuario@ejemplo.com"
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white disabled:opacity-50 transition"
+                    />
+                  </label>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <label className="block">
                   <span className="text-xs font-semibold text-slate-500">Primer Nombre *</span>
@@ -513,35 +896,71 @@ export function DataManager() {
                 </label>
               </div>
 
-              <label className="block">
-                <span className="text-xs font-semibold text-slate-500">Correo Electrónico *</span>
-                <input
-                  type="email"
-                  value={form.user_email}
-                  disabled={actionMode === "edit"}
-                  onChange={(event) => setFormField("user_email", event.target.value)}
-                  placeholder="usuario@ejemplo.com"
-                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white disabled:opacity-50 transition"
-                />
-              </label>
+              <div className="grid grid-cols-12 gap-3">
+                {/* Selector de País (col-span-5) */}
+                <label className="col-span-5 block">
+                  <span className="text-xs font-semibold text-slate-500">País / Prefijo</span>
+                  <select
+                    value={form.country_iso}
+                    onChange={(event) => {
+                      const selectedIso = event.target.value;
+                      const country = countriesList.find((c) => c.iso === selectedIso);
+                      if (country) {
+                        setForm((prev) => ({
+                          ...prev,
+                          country_iso: country.iso,
+                          country_code: country.prefix_area || country.prefix || ""
+                        }));
+                      }
+                    }}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
+                  >
+                    {countriesList.map((c) => (
+                      <option key={c.iso} value={c.iso}>
+                        {c.nombre} ({c.prefix_area || c.prefix || c.iso})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {/* Teléfono sin prefijo (col-span-7) */}
+                <label className="col-span-7 block">
+                  <span className="text-xs font-semibold text-slate-500">Teléfono *</span>
+                  <div className="mt-1 flex rounded-xl border border-slate-200 bg-slate-50 overflow-hidden focus-within:border-blue-400 transition">
+                    <span className="flex items-center bg-slate-100/80 px-3 text-xs font-semibold text-slate-500 border-r border-slate-200 select-none">
+                      {form.country_code || "+57"}
+                    </span>
+                    <input
+                      value={form.phone_number}
+                      onChange={(event) => setFormField("phone_number", event.target.value)}
+                      placeholder="3001234567"
+                      className="w-full bg-transparent px-3 py-2 text-sm outline-none"
+                    />
+                  </div>
+                </label>
+              </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <label className="block">
-                  <span className="text-xs font-semibold text-slate-500">Teléfono</span>
-                  <input
-                    value={form.phone_number}
-                    onChange={(event) => setFormField("phone_number", event.target.value)}
-                    placeholder="+573001234567"
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
-                  />
+                  <span className="text-xs font-semibold text-slate-500">Proveedor</span>
+                  <select
+                    value={form.provider}
+                    onChange={(event) => setFormField("provider", event.target.value)}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
+                  >
+                    {providerOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
                 </label>
                 <label className="block">
-                  <span className="text-xs font-semibold text-slate-500">DNI / Documento</span>
+                  <span className="text-xs font-semibold text-slate-500">Compañía ID</span>
                   <input
-                    value={form.dni}
-                    onChange={(event) => setFormField("dni", event.target.value)}
-                    placeholder="DNI o Cédula"
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
+                    value={form.companyId}
+                    disabled={!isSU}
+                    onChange={(event) => setFormField("companyId", event.target.value)}
+                    placeholder="ID Compañía"
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white disabled:opacity-50 transition"
                   />
                 </label>
               </div>
@@ -559,7 +978,7 @@ export function DataManager() {
                     <option value="pending_approval">Pendiente</option>
                   </select>
                 </label>
-                <label className="block">
+                <label className="block col-span-2">
                   <span className="text-xs font-semibold text-slate-500">Género</span>
                   <select
                     value={form.gender}
@@ -571,59 +990,121 @@ export function DataManager() {
                     <option value="other">Otro</option>
                   </select>
                 </label>
-                <label className="block">
-                  <span className="text-xs font-semibold text-slate-500">Proveedor</span>
+              </div>
+
+              {/* CONTRASEÑA EN MODO CREACIÓN (MANUAL) */}
+              {actionMode === "add" && form.provider === "manual" && (
+                <div className="grid grid-cols-2 gap-3 mt-4 animate-slide-in">
+                  <label className="block">
+                    <span className="text-xs font-semibold text-slate-500">Contraseña de acceso *</span>
+                    <input
+                      type="password"
+                      value={form.password}
+                      onChange={(event) => setFormField("password", event.target.value)}
+                      placeholder="Por defecto: DNI**"
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold text-slate-500">Confirmar Contraseña *</span>
+                    <input
+                      type="password"
+                      value={form.confirmPassword}
+                      onChange={(event) => setFormField("confirmPassword", event.target.value)}
+                      placeholder="Repite la contraseña"
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
+                    />
+                  </label>
+                </div>
+              )}
+
+              {/* GESTIÓN DE CONTRASEÑA EN MODO EDICIÓN (MANUAL) */}
+              {actionMode === "edit" && form.provider === "manual" && (
+                <div className="mt-4 border-t border-slate-100 pt-4 space-y-3">
+                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide select-none">Gestionar Contraseña</h4>
+                  
+                  {!showChangePasswordPanel ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowChangePasswordPanel(true)}
+                      className="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50/50 px-4 py-2.5 text-xs font-semibold text-slate-700 transition cursor-pointer select-none"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="w-4 h-4 text-slate-500">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0V10.5m-2.25 13.5h13.5c1.242 0 2.25-1.008 2.25-2.25V12c0-1.242-1.008-2.25-2.25-2.25H5.25C4.008 9.75 3 10.758 3 12v9.75c0 1.242 1.008 2.25 2.25 2.25Z" />
+                      </svg>
+                      Cambiar Contraseña de Acceso
+                    </button>
+                  ) : (
+                    <div className="rounded-2xl border border-slate-100 bg-slate-50/40 p-4 space-y-3">
+                      <label className="block">
+                        <span className="text-[11px] font-semibold text-slate-500">Contraseña Anterior *</span>
+                        <input
+                          type="password"
+                          value={pwdForm.oldPassword}
+                          onChange={(e) => setPwdForm(prev => ({ ...prev, oldPassword: e.target.value }))}
+                          placeholder="Ingresa contraseña actual"
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-1.5 text-xs outline-none focus:border-blue-400 transition"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-semibold text-slate-500">Nueva Contraseña *</span>
+                        <input
+                          type="password"
+                          value={pwdForm.newPassword}
+                          onChange={(e) => setPwdForm(prev => ({ ...prev, newPassword: e.target.value }))}
+                          placeholder="Nueva contraseña"
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-1.5 text-xs outline-none focus:border-blue-400 transition"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-semibold text-slate-500">Confirmar Nueva Contraseña *</span>
+                        <input
+                          type="password"
+                          value={pwdForm.confirmPassword}
+                          onChange={(e) => setPwdForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                          placeholder="Confirma nueva contraseña"
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-1.5 text-xs outline-none focus:border-blue-400 transition"
+                        />
+                      </label>
+                      <div className="flex justify-end gap-2 pt-1 select-none">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowChangePasswordPanel(false);
+                            setPwdForm({ oldPassword: "", newPassword: "", confirmPassword: "" });
+                          }}
+                          className="rounded-lg border border-slate-200 hover:bg-slate-50 px-3 py-1.5 text-[11px] font-semibold text-slate-600 transition cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleChangePassword}
+                          className="rounded-lg bg-blue-600 hover:bg-blue-700 px-3.5 py-1.5 text-[11px] font-bold text-white transition shadow-sm cursor-pointer"
+                        >
+                          Actualizar Contraseña
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block col-span-2">
+                  <span className="text-xs font-semibold text-slate-500">Asignar Cargo / Rol *</span>
                   <select
-                    value={form.provider}
-                    onChange={(event) => setFormField("provider", event.target.value)}
+                    value={selectedRoleId}
+                    onChange={(event) => setSelectedRoleId(event.target.value)}
                     className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
                   >
-                    <option value="google">Google</option>
-                    <option value="facebook">Facebook</option>
-                    <option value="linkedin">LinkedIn</option>
+                    <option value="">Ninguno (Sin Rol)</option>
+                    {rolesList.map((role) => (
+                      <option key={role.id} value={role.id}>
+                        {role.name} ({role.scope})
+                      </option>
+                    ))}
                   </select>
-                </label>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="text-xs font-semibold text-slate-500">Código País (Prefijo)</span>
-                  <input
-                    value={form.country_code}
-                    onChange={(event) => setFormField("country_code", event.target.value)}
-                    placeholder="+57"
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-semibold text-slate-500">ISO País</span>
-                  <input
-                    value={form.country_iso}
-                    onChange={(event) => setFormField("country_iso", event.target.value)}
-                    placeholder="CO"
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
-                  />
-                </label>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="text-xs font-semibold text-slate-500">Compañía ID</span>
-                  <input
-                    value={form.companyId}
-                    onChange={(event) => setFormField("companyId", event.target.value)}
-                    placeholder="ID Compañía"
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-semibold text-slate-500">Cargo / Posición</span>
-                  <input
-                    value={form.position}
-                    onChange={(event) => setFormField("position", event.target.value)}
-                    placeholder="Staff, Manager, etc."
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
-                  />
                 </label>
               </div>
             </div>
@@ -682,8 +1163,63 @@ export function DataManager() {
           </div>
         </div>
       ) : null}
+
+      {/* Toasts Container */}
+      <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[999] flex flex-col gap-2 max-w-md w-full pointer-events-none items-center px-4">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`flex items-start gap-3 p-4 rounded-xl shadow-lg border transition-all duration-300 pointer-events-auto transform translate-y-0 ${
+              toast.type === "success"
+                ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                : toast.type === "warning"
+                ? "bg-amber-50 border-amber-200 text-amber-800"
+                : toast.type === "info"
+                ? "bg-blue-50 border-blue-200 text-blue-800"
+                : "bg-rose-50 border-rose-200 text-rose-800"
+            }`}
+          >
+            {toast.type === "success" && (
+              <svg className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            {toast.type === "warning" && (
+              <svg className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            )}
+            {toast.type === "info" && (
+              <svg className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            {toast.type === "error" && (
+              <svg className="h-5 w-5 text-rose-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+            <div className="flex-1 text-sm font-medium">{toast.message}</div>
+            <button
+              onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+              className="text-slate-400 hover:text-slate-600 transition shrink-0"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        ))}
+      </div>
     </section>
   );
+}
+
+function getStatusLabel(status: string) {
+  const clean = String(status || "").toLowerCase().trim();
+  if (clean === "active") return "Activo";
+  if (clean === "pending_approval") return "Pendiente";
+  return "Inactivo";
 }
 
 export default DataManager;

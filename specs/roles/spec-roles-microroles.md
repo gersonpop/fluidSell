@@ -6,52 +6,56 @@ La plataforma requiere de un modelo de autorización robusto y granular que perm
 ---
 
 ## Objetivo
-Diseñar e implementar el módulo de administración y el motor de validación de **Roles y Permisos Granulares**. El sistema permitirá:
+Diseñar e implementar el módulo de administración y el motor de validación de **Roles y Permisos Granulares** incorporando **Controles de Integridad Criptográfica** y un **Flujo de Respaldo Cifrado con Restauración para Super Usuarios**. El sistema permitirá:
 1. Mapear de forma jerárquica los módulos y submódulos registrados en la tabla `modules`.
 2. Crear, editar y eliminar roles por empresa (`companyId`), donde cada rol encapsula el conjunto total y exclusivo de accesos de un usuario.
-3. Configurar de manera precisa cuatro acciones básicas (**Leer, Crear, Actualizar y Borrar**) por cada módulo y submódulo.
+3. Configurar de manera precisa cuatro acciones básicas (**Leer, Crear, Actualizar y Borrar**) y acciones especiales (custom actions) por cada módulo y submódulo.
 4. Asegurar la consistencia de estos permisos en la navegación (web y móvil) y blindar el acceso a nivel de API (backend).
+5. Detectar en tiempo real la manipulación de base de datos o ataques mediante firmas HMAC-SHA256, restringiendo accesos y permitiendo la recuperación segura SU desde copias cifradas AES-256-CBC.
 
 ---
 
 ## Usuario Principal
-*   **Súper Usuario (SU)**: Administrador global de la plataforma con privilegios para crear y editar roles de cualquier empresa.
-*   **Administrador de Empresa (Admin)**: Gestiona la creación de roles específicos y la asignación de usuarios dentro del alcance de su organización (`companyId`).
+*   **Súper Usuario (SU)**: Administrador global de la plataforma con privilegios completos, único rol autorizado para ejecutar la reparación y restauración de consistencia de roles comprometidos.
+*   **Administrador de Empresa (Admin)**: Gestiona la creación de roles específicos y la asignación de usuarios dentro del alcance de su organización (`companyId`). No tiene privilegios para restaurar roles vulnerados.
 *   **Usuario Final**: Empleado de la empresa que accede a los módulos según los permisos definidos en su rol asignado.
 
 ---
 
 ## Historia de Usuario
-Como desarrollador de la plataforma, requiero que el módulo de roles me permita mapear los módulos de la aplicación contenidos en la tabla `modules`, generar diferentes roles desglosando el acceso a **Lectura, Creación, Actualización y Borrado** de cada módulo y submódulo, y definir de forma exclusiva los accesos de cada usuario mediante la asignación de un único rol activo por empresa.
+Como desarrollador de la plataforma, requiero que el módulo de roles me permita mapear los módulos de la aplicación contenidos en la tabla `modules`, generar diferentes roles desglosando el acceso a **Lectura, Creación, Actualización y Borrado** de cada módulo, y resguardar la seguridad del sistema ante inyecciones de datos o manipulaciones maliciosas de la base de datos mediante firmas criptográficas de integridad y respaldos cifrados exclusivos para Super Usuarios.
 
 ---
 
 ## Alcance
 *   **Interfaz de Administración de Roles**: Panel interactivo para seleccionar un cargo, ver su descripción, alcance (scope) y una cuadrícula jerárquica con checkboxes para configurar los permisos por módulo.
 *   **Mapeo Dinámico de Módulos**: Agrupación visual de los módulos de la base de datos en tres categorías: *Aplicación Móvil*, *Menú Principal*, y *General*.
-*   **Permisos de Cuatro Acciones**: Configuración granular de **Leer, Crear, Actualizar y Borrar** por cada módulo.
+*   **Permisos de Cuatro Acciones y Acciones Especiales**: Configuración granular de **Leer, Crear, Actualizar y Borrar** más acciones de negocio personalizadas por módulo.
+*   **Firma de Seguridad e Integridad Criptográfica**: Cada cargo almacena un hash `hashPermission` calculado determinísticamente con HMAC-SHA256 a partir de sus permisos activos. Si los datos se alteran manualmente, se inhabilita el acceso y se marca como `"vulnerada"`.
+*   **Copia de Seguridad Cifrada (`RolePermissionSecurity`)**: Respaldo cifrado simétrico mediante **AES-256-CBC** de los permisos legítimos de cada rol en el momento de ser guardados.
+*   **Acción de Reparación SU**: Módulo premium para Super Usuarios que permite restaurar el cargo vulnerado descifrando el respaldo, identificando granularmente las discrepancias e inyecciones de datos fraudulentos en base de datos, registrando un informe completo en `audit_logs` y re-estableciendo la firma digital válida.
 *   **Asignación de Rol Único**: Cada usuario final tendrá asociado exactamente un solo rol activo por organización.
 *   **Seguridad y Aislamiento por Tenant (`companyId`)**: Los roles creados por una organización son privados y no pueden ser consultados ni modificados por otras empresas.
-*   **Control de Acceso en Backend (API)**: Validación en tiempo de ejecución en la API dinámica para rechazar operaciones de escritura si el rol del usuario no tiene los permisos necesarios.
+*   **Control de Acceso en Backend (API)**: Validación en tiempo de ejecución en la API dinámica para rechazar operaciones de escritura si el rol del usuario no tiene los permisos necesarios o está vulnerado.
 
 ---
 
 ## Fuera de Alcance
 *   Asignación de múltiples roles simultáneos a un mismo usuario (herencia aditiva).
 *   Políticas de acceso para servicios IAM externos o proveedores de la nube (AWS/Azure/GCP).
-*   Auditoría de lectura (solo se auditan las mutaciones de datos: creación, edición y borrado).
+*   Auditoría de lectura (solo se auditan las mutaciones de datos: creación, edición, borrado y reparaciones).
 
 ---
 
 ## Requerimientos No Funcionales
 *   **Rendimiento**: El cálculo de permisos del usuario logueado debe realizarse en el servidor durante la sesión y ser cached para evitar parpadeos visuales (flickering) al navegar en el cliente.
-*   **Seguridad y Cifrado**: El JSON de permisos asignado al rol debe poder almacenarse de forma íntegra en la base de datos (con firma digital HMAC o hash de integridad) para prevenir manipulaciones manuales en caliente.
+*   **Seguridad y Cifrado**: El JSON de permisos asignado al rol debe almacenarse de forma cifrada simétricamente (AES-256-CBC) y validarse mediante firma HMAC-SHA256 para prevenir manipulaciones manuales en caliente.
 *   **Integridad Referencial**: Impedir la eliminación de un módulo en la base de datos si existen permisos activos de roles asociados a él.
 
 ---
 
 ## Restricción de Persistencia
-*   Todos los roles, módulos y permisos deben ser almacenados en la base de datos relacional PostgreSQL activa en caliente.
+*   Todos los roles, módulos, permisos y respaldos cifrados deben ser almacenados en la base de datos relacional PostgreSQL activa en caliente.
 *   No se permite simular la persistencia de permisos en archivos locales JSON o memoria temporal para el cierre de esta funcionalidad en producción.
 
 ---
@@ -65,14 +69,23 @@ Como desarrollador de la plataforma, requiero que el módulo de roles me permita
     *   **Crear**: Habilita los botones de "Agregar" y autoriza peticiones `POST`.
     *   **Actualizar**: Habilita los botones de "Editar/Guardar" y autoriza peticiones `PATCH`.
     *   **Borrar**: Habilita los botones de "Eliminar" y autoriza peticiones `DELETE`.
-5.  **Aislamiento Multitenant**: Un cliente corporativo solo puede ver y editar los roles que tengan su mismo `companyId`. El súper usuario (`SU`) puede administrar los roles de todas las empresas.
-6.  **Protección de Roles Activos**: No se permite eliminar un Rol si existen usuarios activos asignados a él; el sistema debe exigir la reasignación de los usuarios a otro Rol antes de proceder.
+5.  **Auto-activación de Lectura**: Al otorgar cualquier permiso CRUD (Crear, Actualizar, Borrar) o habilitar una acción especial para un módulo en la matriz, el sistema marcará y activará automáticamente el permiso de **Leer** correspondiente.
+6.  **Confirmación para Revocar Lectura**: Al intentar deshabilitar el permiso de **Leer** en un módulo que posee otros permisos o acciones especiales activas, se interrumpirá la acción y se desplegará un modal premium advirtiendo que se revocarán todos los permisos y acciones del módulo en bloque.
+7.  **Depreciación Histórica**: Si un módulo tiene permisos activos asignados y se guarda sin ningún permiso habilitado, la fila existente no se borra, sino que pasa al estado `'deprecated'`. Si se vuelve a guardar un permiso para ese módulo, se creará una fila nueva con estado `'active'` en lugar de reactivar la antigua.
+8.  **Integridad por Firmas**: Cada cargo en la base de datos posee un campo `hashPermission` que representa la firma criptográfica HMAC-SHA256 de sus permisos activos ordenados determinísticamente. En cada lectura, el servidor valida la firma. Si difiere, bloquea los permisos (retornando un set vacío) y marca al cargo con el estado de integridad `"vulnerada"`.
+9.  **Respaldo Cifrado Simétrico**: Al guardar permisos legítimamente, se crea o actualiza un registro en `RolePermissionSecurity` que contiene los permisos serializados en un JSON encriptado mediante **AES-256-CBC** con claves derivadas del `AUTH_SECRET` del servidor.
+10. **Reparación SU Exclusiva**: La acción de restauración o depuración a cero de cargos con estado `"vulnerada"` está estrictamente restringida a usuarios con rol `"SU"` en cabeceras de sesión.
+11. **Comparación e Informe Granular**: Durante el proceso de restauración, el backend descifra la copia cifrada AES-256-CBC, realiza un mapeo diferencial para detectar las modificaciones no autorizadas hechas directamente en PostgreSQL (filas borradas de la base de datos, inyecciones de nuevos módulos, o valores CRUD o acciones alteradas), sobrescribe la base de datos con los registros válidos, recalcula y firma el hash de seguridad, y registra un reporte textual detallado en `audit_logs` bajo el tipo de acción `"repair_audit_report"`.
+12. **Aislamiento Multitenant**: Un cliente corporativo solo puede ver y editar los roles que tengan su mismo `companyId`. El súper usuario (`SU`) puede administrar los roles de todas las empresas.
+13. **Protección de Roles Activos**: No se permite eliminar un Rol si existen usuarios activos asignados a él; el sistema debe exigir la reasignación de los usuarios a otro Rol antes de proceder.
 
 ---
 
 ## Estados y Casos Borde
 *   **Rol Activo**: Disponible para ser asignado a usuarios. Sus permisos se evalúan en tiempo real en cada petición.
 *   **Rol Inactivo**: Oculto para nuevas asignaciones, pero se mantiene en la base de datos para auditoría histórica.
+*   **Cargos con Integridad Completa**: Cargos cuya firma en base de datos coincide con el cálculo dinámico de permisos activos actuales. Se muestra `"Completa"` en color verde en el panel de control.
+*   **Cargos con Integridad Vulnerada**: Cargos cuya firma digital no coincide debido a manipulación externa en base de datos. Se inhabilitan los accesos normales en caliente, se muestra un indicador `"VULNERADA"` intermitente en rojo, y se activa el botón dinámico de reparación `"🛠️ Reparar"`.
 *   **Intento de Acceso Cruzado**: Si un usuario intenta enviar un `companyId` alterado en las cabeceras HTTP, la API bloqueará la petición registrando un evento de seguridad de denegación de acceso.
 *   **Módulos sin Permisos**: Si a un usuario se le retiran todos los permisos de un módulo, este módulo desaparecerá instantáneamente de su Sidebar.
 
@@ -80,20 +93,29 @@ Como desarrollador de la plataforma, requiero que el módulo de roles me permita
 
 ## Diseño Funcional de UI
 
-El módulo de Roles presentará un diseño homogéneo y de alta fidelidad como se describe a continuación:
+El módulo de Roles presentará un diseño homogéneo, dinámico y de alta fidelidad como se describe a continuación:
 
 ### 1. Panel de Control Superior
-*   **Dropdown "Cargo"**: Selector para elegir el rol a configurar (ej. `Superadmin`, `Vendedor`, `Administrador`).
-*   **Botones de Acción**:
-    *   `Editar Rol`: Abre el panel/drawer deslizable para modificar el nombre, clave o descripción.
-    *   `Eliminar`: Elimina el rol (siempre que no tenga usuarios asignados).
-    *   `Agregar` (Botón premium verde): Abre el panel lateral para crear un nuevo rol desde cero.
-*   **Campos de Metadatos del Rol**:
-    *   *Id clave* (Ej. `SU`, `VEN`): Código abreviado e inmutable del rol.
-    *   *Descripción* (Ej. `Administrador de la plataforma`): Resumen de la responsabilidad del cargo.
-    *   *Alcance / Scope* (Dropdown): Define el nivel de acceso general (`Super Admin`, `admin`, `user`).
+*   **Filtros Rápidos e Inputs**: Buscador inteligente por ID clave, nombre o descripción y selector rápido de alcances generales (Scopes).
+*   **Columnas Dinámicas**: Menú desplegable para ocultar/mostrar columnas clave de la grilla en caliente (`ID Clave`, `Nombre`, `Descripción`, `Alcance`, `Cant. Permisos`, `Integridad`, `Acciones`).
+*   **Botón Agregar Cargo**: Elemento premium color verde menta (`#2ad072`) que despliega el Drawer lateral para la creación del cargo.
 
-### 2. Cuadrícula de Permisos Jerárquica
+### 2. Grilla de Cargos e Integridad Visual
+*   **Columna de Integridad**: Despliega un badge con la verificación del sistema en tiempo real:
+    *   *Completa* (Verde): Indica consistencia criptográfica exitosa.
+    *   *VULNERADA* (Rojo intermitente con animación `animate-pulse` e ícono de advertencia): Indica firma dañada debido a manipulación ilícita externa.
+*   **Botón Dinámico de Acción**:
+    *   Si la integridad es *Completa*, se muestra el botón tradicional **"Ver permisos"** (estilo violeta).
+    *   Si la integridad es *VULNERADA*, el botón es reemplazado por la acción animada **"🛠️ Reparar"** (en color rojo/rosa de alta advertencia).
+
+### 3. Modal de Reparación de Integridad
+Activado al presionar el botón de reparación:
+*   **Si el Actor de Sesión no es "SU"**: Despliega un banner premium de color rojo con ícono de candado indicando que el acceso está estrictamente restringido y bloquea cualquier acción de escritura o botones.
+*   **Si el Actor de Sesión es "SU"**: Despliega una alerta de seguridad del sistema y provee dos elecciones claras:
+    1.  **Restaurar desde Respaldo Cifrado**: Dispara la restauración, activa un spinner e indicador de progreso y despliega los resultados de discrepancias en color de alto contraste en un visor de consola oscura (`bg-slate-950 font-mono text-slate-100 p-4 rounded-2xl`).
+    2.  **Configurar desde Cero**: Revoca de forma completa los permisos alterados y reinicia la copia de seguridad cifrada, abriendo una ventana limpia para reasignar accesos legítimos.
+
+### 4. Cuadrícula de Permisos Jerárquica y Acciones Especiales
 Organizada en acordeones o secciones por categorías de módulos:
 *   **Sección A: Aplicación Móvil** (Módulos como *Postcosecha*, *Boncheo*, *Cuarto Frío*, *Registrar Enfermedades*).
 *   **Sección B: Menú Principal** (Módulos como *Inicio*, *Dashboard*, *Cultivo*, *Talento Humano*).
@@ -101,7 +123,9 @@ Organizada en acordeones o secciones por categorías de módulos:
 
 Cada fila de módulo presentará:
 *   El nombre del módulo y su ruta técnica entre paréntesis (ej. `Postcosecha ( /ScanPost )`).
-*   Checkboxes/Switches agrupados bajo las columnas: **Leer**, **Crear**, **Actualizar**, y **Borrar**.
+*   Checkboxes agrupados bajo las columnas: **Leer**, **Crear**, **Actualizar**, y **Borrar**.
+*   Botón **"Acciones"** con indicación en badge superior sobre la cantidad de acciones especiales configuradas en el módulo.
+*   Menú desplegable dinámico al dar clic en "Acciones", renderizando una grilla con switches/checkboxes de accesos específicos de negocio (ej. *Escanear Postcosecha*, *Aprobar Lote*, *Clonar Rol*).
 *   Sangría visual clara para diferenciar submódulos hijos (ej. bajo *Cultivo*: *Asignaciones*, *Etiquetas*, *Variedades*, *Fincas*).
 
 ---
@@ -116,81 +140,141 @@ Al realizar cualquier operación de base de datos a través de la API dinámica 
 
 ## Contratos API
 
-### 1. Obtener Permisos del Rol Seleccionado
-*   **Endpoint**: `GET /api/v1/db/role_permissions`
-*   **Query Params**: `roleId=uuid`
-*   **Cabeceras**: Autenticación estándar de desarrollo/producción.
+### 1. Obtener y Listar Roles del Tenant (Integridad y Firmas Dinámicas)
+*   **Endpoint**: `GET /api/v1/db/roles`
+*   **Cabeceras**: Autenticación estándar y Tenant ID.
 *   **Respuesta Exitosa (200 OK)**:
     ```json
     {
-      "roleId": "uuid-rol",
-      "permissions": [
+      "table": "roles",
+      "count": 1,
+      "data": [
         {
-          "moduleId": "uuid-modulo",
-          "moduleName": "Postcosecha",
-          "route": "/ScanPost",
-          "canRead": true,
-          "canCreate": true,
-          "canUpdate": true,
-          "canDelete": true
+          "id": "uuid-rol",
+          "key_id": "VEN",
+          "name": "Vendedor",
+          "description": "Responsable de ventas",
+          "scope": "user",
+          "company_id": "900000000",
+          "status": "active",
+          "hashPermission": "8c922f805604eaaed7d3...",
+          "integrityStatus": "completa",
+          "permissions": {
+            "m-postcosecha": {
+              "read": true,
+              "create": false,
+              "update": false,
+              "delete": false,
+              "status": "active",
+              "microroles": {
+                "scan_post": true
+              }
+            }
+          }
         }
       ]
     }
     ```
 
-### 2. Guardar/Actualizar Permisos de un Rol
-*   **Endpoint**: `PATCH /api/v1/db/role_permissions`
+### 2. Guardar/Actualizar Permisos de un Rol (Firma Digital y Copia de Respaldo Cifrada)
+*   **Endpoint**: `PATCH /api/v1/db/roles`
 *   **Body**:
     ```json
     {
-      "roleId": "uuid-rol",
-      "permissions": [
-        {
-          "moduleId": "uuid-modulo",
-          "canRead": true,
-          "canCreate": true,
-          "canUpdate": true,
-          "canDelete": true
+      "id": "uuid-rol",
+      "permissions": {
+        "m-postcosecha": {
+          "read": true,
+          "create": false,
+          "update": false,
+          "delete": false,
+          "microroles": {
+            "scan_post": true
+          }
         }
-      ]
+      }
     }
     ```
-*   **Respuesta Exitosa (200 OK)**: `{ "ok": true, "message": "Permisos actualizados correctamente" }`
-*   **Error (403 Forbidden)**: `{ "message": "No tienes privilegios para modificar roles" }`
+*   **Operación Backend**: Actualiza la firma `hashPermission` mediante HMAC-SHA256, serializa y cifra simétricamente en AES-256-CBC y escribe la copia de seguridad cifrada en `RolePermissionSecurity`.
+*   **Respuesta Exitosa (200 OK)**: `{ "table": "roles", "data": { "id": "uuid-rol", ... } }`
+
+### 3. Reparación y Restauración de Integridad (Exclusivo Super Usuario SU)
+*   **Endpoint**: `PATCH /api/v1/db/roles`
+*   **Body**:
+    ```json
+    {
+      "id": "uuid-rol",
+      "action": "repair",
+      "repairAction": "restore"
+    }
+    ```
+    *(Nota: `repairAction` puede tomar el valor `"restore"` para restaurar copia cifrada o `"scratch"` para restablecer a cero)*.
+*   **Operación Backend**: Valida privilegio `"SU"`, recupera y descifra el respaldo cifrado, computa diferencias y alteraciones no autorizadas contra la base de datos, re-establece permisos correctos, re-firma el hash, inserta el reporte detallado en `audit_logs` y retorna el reporte.
+*   **Respuesta Exitosa (200 OK)**:
+    ```json
+    {
+      "table": "roles",
+      "data": {
+        "ok": true,
+        "report": "Se detectaron las siguientes discrepancias en base de datos:\n1. Módulo \"Postcosecha\": canCreate cambiado de FALSE a TRUE (ALTERADO)\n2. Módulo \"Boncheo\": Permisos ILEGALES añadidos por fuera de la aplicación."
+      }
+    }
+    ```
+*   **Error (403 Forbidden - Actor no SU)**:
+    ```json
+    {
+      "message": "Forbidden: Solo el Super Usuario (SU) está autorizado para reparar la integridad de un cargo."
+    }
+    ```
 
 ---
 
 ## Datos y Persistencia
 
-### Modelo de Datos (Tablas PostgreSQL)
+### Modelo de Datos en Prisma (`schema.prisma`)
 
-```sql
--- Tabla Principal de Roles
-CREATE TABLE public."Role" (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    key_id VARCHAR(50) UNIQUE NOT NULL,      -- Ej: 'SU', 'VEN'
-    name VARCHAR(100) NOT NULL,              -- Ej: 'Superadmin', 'Vendedor'
-    description TEXT,                        -- Ej: 'Administrador de la plataforma'
-    scope VARCHAR(50) NOT NULL,              -- 'Super Admin', 'admin', 'user'
-    company_id VARCHAR(50),                  -- Aislamiento de tenant
-    status VARCHAR(20) DEFAULT 'active',     -- 'active', 'inactive'
-    created_at TIMESTAMP DEFAULT now(),
-    updated_at TIMESTAMP DEFAULT now()
-);
+```prisma
+model Role {
+  id                      String                  @id @default(cuid())
+  key_id                  String                  @unique
+  name                    String
+  description             String?
+  scope                   String
+  company_id              String?
+  status                  String                  @default("active")
+  hashPermission          String?                 // Firma criptográfica HMAC-SHA256 de permisos
+  createdAt               DateTime                @default(now())
+  updatedAt               DateTime                @updatedAt
+  permissions             RolePermission[]
+  securityBackup          RolePermissionSecurity? // Vínculo a copia de seguridad cifrada
+}
 
--- Tabla de Permisos por Módulo
-CREATE TABLE public."RolePermission" (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    role_id UUID REFERENCES public."Role"(id) ON DELETE CASCADE,
-    module_id UUID REFERENCES public.modules(id) ON DELETE CASCADE,
-    can_read BOOLEAN DEFAULT false,
-    can_create BOOLEAN DEFAULT false,
-    can_update BOOLEAN DEFAULT false,
-    can_delete BOOLEAN DEFAULT false,
-    created_at TIMESTAMP DEFAULT now(),
-    updated_at TIMESTAMP DEFAULT now(),
-    CONSTRAINT unique_role_module UNIQUE (role_id, module_id)
-);
+model RolePermission {
+  id        String   @id @default(cuid())
+  roleId    String
+  moduleId  String
+  canRead   Boolean  @default(false)
+  canCreate Boolean  @default(false)
+  canUpdate Boolean  @default(false)
+  canDelete Boolean  @default(false)
+  actions   Json?    @default("{}")              // Acciones especiales de negocio
+  status    String   @default("active")          // 'active' o 'deprecated'
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  role      Role     @relation(fields: [roleId], references: [id])
+  module    Modules  @relation(fields: [moduleId], references: [id])
+
+  @@index([roleId])
+}
+
+model RolePermissionSecurity {
+  id        String   @id @default(cuid())
+  roleId    String   @unique
+  backup    String   // JSON de matriz de permisos cifrado en AES-256-CBC
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  role      Role     @relation(fields: [roleId], references: [id])
+}
 ```
 
 ---

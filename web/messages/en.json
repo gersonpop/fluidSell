@@ -91,7 +91,8 @@
       "typeDescription": "Category Desc.",
       "typeUse": "Use Type",
       "created_at": "Created",
-      "updated_at": "Updated"
+      "updated_at": "Updated",
+      "destination": "Destination"
     },
     "actions": {
       "edit": "Edit",

@@ -2,8 +2,10 @@ import {getServerSession} from "next-auth";
 import {redirect} from "next/navigation";
 import {authOptions} from "@/lib/auth-options";
 import {listRecords, type ActorContext} from "@/server/pgDynamicDbStore";
+import {selectSidebarModulesFromDbRows} from "@/lib/sidebar-access";
+import {ProtectedSidebarLayout} from "@/components/protected-sidebar-layout";
 import {NewPagePattern} from "@/components/module-patterns/NewPagePattern";
-import DynamicComponent from "./component.manager";
+import DynamicComponent from "./component.workflow";
 
 type PageProps = {
   params: Promise<{locale: string}>;
@@ -23,20 +25,30 @@ export default async function DynamicNewPage({params}: PageProps) {
   };
 
   const rows = (await listRecords(actor, "modules", null)) as Array<Record<string, any>>;
-  const currentRoute = "/users/manager";
+  const initialSidebarModules = selectSidebarModulesFromDbRows(rows);
+
+  const currentRoute = "/workflow";
   const currentModule = rows.find(m => m.route === currentRoute && m.status === "active");
 
   return (
-    <NewPagePattern
-      title={currentModule?.name ?? "manager"}
+    <ProtectedSidebarLayout
+      locale={locale}
+      userName={session?.user?.name ?? "Usuario"}
+      userEmail={session?.user?.email ?? ""}
+      userImage={session?.user?.image ?? null}
+      actorId={actor.actorId}
+      actorRole={actor.role}
+      companyId={actor.companyId}
+      initialModules={initialSidebarModules}
+      title={currentModule?.name ?? "workflow"}
       description={currentModule?.description ?? ""}
     >
-      <DynamicComponent
-        currentUserEmail={session.user.email ?? undefined}
-        currentUserImage={session.user.image ?? undefined}
-        currentUserProvider={(session.user as any).provider ?? undefined}
-        isSU={role === "SU"}
-      />
-    </NewPagePattern>
+      <NewPagePattern
+        title={currentModule?.name ?? "workflow"}
+        description={currentModule?.description ?? ""}
+      >
+        <DynamicComponent />
+      </NewPagePattern>
+    </ProtectedSidebarLayout>
   );
 }

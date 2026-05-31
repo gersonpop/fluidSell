@@ -57,6 +57,7 @@ export function ProtectedSidebarLayout({
   const [dynamicModules, setDynamicModules] = useState<DynamicModuleNav[]>(initialModules ?? []);
   const [modulesLoading, setModulesLoading] = useState(initialModules === undefined);
   const [modulesError, setModulesError] = useState<string | null>(null);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const normalizedActorRole: "SU" | "cliente" = String(actorRole).trim().toLowerCase() === "su" ? "SU" : "cliente";
 
   const expanded = mode === "fixed" || (mode === "auto" && hoverExpanded);
@@ -297,14 +298,30 @@ export function ProtectedSidebarLayout({
                   <nav className={compact ? "space-y-2" : "space-y-1"}>
                     {sidebarItems.map((group) => {
                       if (group.isSection) {
+                        const isCollapsed = collapsedSections[group.id] === true;
                         return (
                           <div key={group.id} className="space-y-1">
                             {compact ? <div className="mx-auto mb-3 h-px w-12 bg-white/20" /> : null}
-                            <p className={`px-2 pb-0 pt-4 text-[10px] uppercase tracking-[0.18em] text-white/55 ${compact ? "text-center" : ""}`}>
-                              {group.name}
-                            </p>
+                            <div
+                              onClick={() => group.children.length > 0 && setCollapsedSections(prev => ({
+                                ...prev,
+                                [group.id]: !prev[group.id]
+                              }))}
+                              className={`group flex items-center select-none ${
+                                group.children.length > 0 ? "cursor-pointer hover:text-white/80" : ""
+                              } ${compact ? "justify-center" : "justify-between px-2 pb-0 pt-4"}`}
+                            >
+                              <p className={`text-[10px] uppercase tracking-[0.18em] text-white/55 transition duration-200 ${compact ? "pb-0 pt-4 text-center" : ""}`}>
+                                {group.name}
+                              </p>
+                              {!compact && group.children.length > 0 ? (
+                                <span className="text-[10px] text-white/40 group-hover:text-white/75 transition duration-200 ml-1">
+                                  {isCollapsed ? "›" : "⌄"}
+                                </span>
+                              ) : null}
+                            </div>
                             {/* Children under the section */}
-                            {group.children.map((child) => {
+                            {!isCollapsed && group.children.map((child) => {
                               const href = `/${locale}${child.route}`;
                               const isActive = pathname === href;
                               return (

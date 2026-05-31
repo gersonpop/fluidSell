@@ -91,7 +91,8 @@
       "typeDescription": "Desc. de catégorie",
       "typeUse": "Type d'utilisation",
       "created_at": "Créé",
-      "updated_at": "Mis à jour"
+      "updated_at": "Mis à jour",
+      "destination": "Destination"
     },
     "actions": {
       "edit": "Modifier",
