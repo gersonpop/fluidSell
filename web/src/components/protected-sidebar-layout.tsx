@@ -45,14 +45,75 @@ export function ProtectedSidebarLayout({
   children
 }: ProtectedSidebarLayoutProps) {
   const pathname = usePathname();
-  const [mode, setMode] = useState<SidebarMode>("fixed");
+  const [mode, setMode] = useState<SidebarMode>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("sidebar_pref_mode") as SidebarMode | null;
+        if (saved && ["compact", "auto", "fixed"].includes(saved)) {
+          return saved;
+        }
+      } catch {}
+    }
+    return "fixed";
+  });
   const [hoverExpanded, setHoverExpanded] = useState(false);
-  const [darkPanel, setDarkPanel] = useState(true);
+  const [darkPanel, setDarkPanel] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("sidebar_pref_dark_panel");
+        if (saved !== null) return saved === "true";
+      } catch {}
+    }
+    return true;
+  });
   const [showModeMenu, setShowModeMenu] = useState(false);
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
-  const [automaticTheme, setAutomaticTheme] = useState(false);
-  const [isSystemDark, setIsSystemDark] = useState(false);
+  const [automaticTheme, setAutomaticTheme] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("sidebar_pref_automatic_theme");
+        if (saved !== null) return saved === "true";
+      } catch {}
+    }
+    return false;
+  });
+  const [isSystemDark, setIsSystemDark] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        return window.matchMedia("(prefers-color-scheme: dark)").matches;
+      } catch {}
+    }
+    return false;
+  });
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  // Save preferences to localStorage when they change
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem("sidebar_pref_mode", mode);
+    } catch {}
+  }, [mode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem("sidebar_pref_dark_panel", String(darkPanel));
+    } catch {}
+  }, [darkPanel]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem("sidebar_pref_automatic_theme", String(automaticTheme));
+    } catch {}
+  }, [automaticTheme]);
+
   const navScrollRef = useRef<HTMLDivElement | null>(null);
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [canScrollDown, setCanScrollDown] = useState(false);
@@ -78,11 +139,22 @@ export function ProtectedSidebarLayout({
   const compact = mode === "compact" || (mode === "auto" && !hoverExpanded);
   const hidden = false;
 
-  const isNightActive = automaticTheme ? isSystemDark : darkPanel;
+  const isNightActive = automaticTheme && isSystemDark;
+  const isSidebarDark = automaticTheme ? isSystemDark : darkPanel;
 
   const bgImage = automaticTheme
     ? (isSystemDark ? "/images/home-brackgorund_dark.png" : "/images/home-brackgorund_light.png")
     : "/images/home-brackgorund_light.png";
+
+  // Synchronize HTML tag class for zero-flash transitions
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (isNightActive) {
+      document.documentElement.classList.add("theme-dark-active");
+    } else {
+      document.documentElement.classList.remove("theme-dark-active");
+    }
+  }, [isNightActive]);
 
   const sidebarWidthClass = useMemo(() => {
     if (expanded) return "w-[256px]";
@@ -209,8 +281,13 @@ export function ProtectedSidebarLayout({
 
   return (
     <main
-      className="relative flex h-dvh overflow-hidden bg-cover bg-center bg-no-repeat transition-[background-image] duration-500"
-      style={{ backgroundImage: `url('${bgImage}')` }}
+      className={`relative flex h-dvh overflow-hidden bg-cover bg-center bg-no-repeat ${
+        isMounted ? "transition-[background-image] duration-500" : ""
+      } ${
+        isNightActive ? "theme-dark-active" : ""
+      }`}
+      style={{ backgroundImage: "var(--home-bg)" }}
+      suppressHydrationWarning
     >
       <div className="absolute inset-0 bg-white/5" />
 
@@ -219,20 +296,25 @@ export function ProtectedSidebarLayout({
         onMouseLeave={() => mode === "auto" && setHoverExpanded(false)}
         className={`relative z-20 h-full shrink-0 overflow-hidden border-r border-white/20 transition-[width,transform] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${sidebarWidthClass} ${hidden ? "-translate-x-full" : "translate-x-0"
           }`}
+        suppressHydrationWarning
       >
         <div
-          className={`h-full ${compact ? "p-2" : "p-2"} ${isNightActive
+          className={`h-full ${compact ? "p-2" : "p-2"} ${isSidebarDark
             ? "bg-gradient-to-b from-[#0B192C]/90 via-[#1E3E62]/70 to-[#0A0F1D]/95"
             : "bg-gradient-to-b from-sky-700/45 via-indigo-700/30 to-slate-900/56"
-            } backdrop-blur-xl transition-all duration-500`}
+            } backdrop-blur-xl ${isMounted ? "transition-all duration-500" : ""}`}
+          suppressHydrationWarning
         >
           <div
-            className={`relative flex h-full flex-col overflow-hidden transition-all duration-500 ${compact
+            className={`relative flex h-full flex-col overflow-hidden ${
+              isMounted ? "transition-all duration-500" : ""
+            } ${compact
               ? "rounded-none border-0 bg-transparent backdrop-blur-none"
-              : isNightActive
+              : isSidebarDark
                 ? "glass-shell rounded-2xl border border-white/10 bg-[#0B192C]/30 backdrop-blur-xl"
                 : "glass-shell rounded-2xl border border-white/20 bg-white/10 backdrop-blur-xl"
               }`}
+            suppressHydrationWarning
           >
             {compact ? null : (
               <>
@@ -323,7 +405,7 @@ export function ProtectedSidebarLayout({
                         const isCollapsed = collapsedSections[group.id] === true;
                         return (
                           <div key={group.id} className="space-y-1">
-                            {compact ? <div className="mx-auto mb-3 h-px w-12 bg-white/20" /> : null}
+                            {compact ? <div className="mx-auto mb-3 h-px w-12 bg-white/10" /> : null}
                             <div
                               onClick={() => group.children.length > 0 && setCollapsedSections(prev => ({
                                 ...prev,
@@ -333,7 +415,7 @@ export function ProtectedSidebarLayout({
                                 group.children.length > 0 ? "cursor-pointer hover:text-white/80" : ""
                               } ${compact ? "justify-center" : "justify-between px-2 pb-0 pt-4"}`}
                             >
-                              <p className={`text-[10px] uppercase tracking-[0.18em] text-white/55 transition duration-200 ${compact ? "pb-0 pt-4 text-center" : ""}`}>
+                              <p className={`text-[10px] uppercase tracking-[0.18em] text-white/35 transition duration-200 ${compact ? "pb-0 pt-4 text-center" : ""}`}>
                                 {group.name}
                               </p>
                               {!compact && group.children.length > 0 ? (
@@ -575,7 +657,9 @@ export function ProtectedSidebarLayout({
       <section className="relative z-10 min-w-0 flex-1 p-2 md:p-2">
         <div
           id="contentSidebar"
-          className={`h-full overflow-hidden rounded-3xl p-2 backdrop-blur-md transition-all duration-500 ${
+          className={`h-full overflow-hidden rounded-3xl p-2 backdrop-blur-md ${
+            isMounted ? "transition-all duration-500" : ""
+          } ${
             isNightActive
               ? "border border-white/10 bg-[#0B192C]/40 text-slate-100"
               : "border border-white/20 bg-white/16 text-inherit"
