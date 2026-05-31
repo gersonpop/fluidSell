@@ -51,6 +51,8 @@ export function ProtectedSidebarLayout({
   const [showModeMenu, setShowModeMenu] = useState(false);
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
+  const [automaticTheme, setAutomaticTheme] = useState(false);
+  const [isSystemDark, setIsSystemDark] = useState(false);
   const navScrollRef = useRef<HTMLDivElement | null>(null);
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [canScrollDown, setCanScrollDown] = useState(false);
@@ -60,9 +62,27 @@ export function ProtectedSidebarLayout({
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const normalizedActorRole: "SU" | "cliente" = String(actorRole).trim().toLowerCase() === "su" ? "SU" : "cliente";
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    setIsSystemDark(mediaQuery.matches);
+
+    const listener = (e: MediaQueryListEvent) => {
+      setIsSystemDark(e.matches);
+    };
+    mediaQuery.addEventListener("change", listener);
+    return () => mediaQuery.removeEventListener("change", listener);
+  }, []);
+
   const expanded = mode === "fixed" || (mode === "auto" && hoverExpanded);
   const compact = mode === "compact" || (mode === "auto" && !hoverExpanded);
   const hidden = false;
+
+  const isNightActive = automaticTheme ? isSystemDark : darkPanel;
+
+  const bgImage = automaticTheme
+    ? (isSystemDark ? "/images/home-brackgorund_dark.png" : "/images/home-brackgorund_light.png")
+    : "/images/home-brackgorund_light.png";
 
   const sidebarWidthClass = useMemo(() => {
     if (expanded) return "w-[256px]";
@@ -189,8 +209,8 @@ export function ProtectedSidebarLayout({
 
   return (
     <main
-      className="relative flex h-dvh overflow-hidden bg-cover bg-center bg-no-repeat"
-      style={{ backgroundImage: "url('/images/home-brackgorund.png')" }}
+      className="relative flex h-dvh overflow-hidden bg-cover bg-center bg-no-repeat transition-[background-image] duration-500"
+      style={{ backgroundImage: `url('${bgImage}')` }}
     >
       <div className="absolute inset-0 bg-white/5" />
 
@@ -201,15 +221,17 @@ export function ProtectedSidebarLayout({
           }`}
       >
         <div
-          className={`h-full ${compact ? "p-2" : "p-2"} ${darkPanel
-            ? "bg-gradient-to-b from-slate-900/78 via-indigo-900/52 to-slate-950/86"
+          className={`h-full ${compact ? "p-2" : "p-2"} ${isNightActive
+            ? "bg-gradient-to-b from-[#0B192C]/90 via-[#1E3E62]/70 to-[#0A0F1D]/95"
             : "bg-gradient-to-b from-sky-700/45 via-indigo-700/30 to-slate-900/56"
-            } backdrop-blur-xl`}
+            } backdrop-blur-xl transition-all duration-500`}
         >
           <div
-            className={`relative flex h-full flex-col overflow-hidden ${compact
+            className={`relative flex h-full flex-col overflow-hidden transition-all duration-500 ${compact
               ? "rounded-none border-0 bg-transparent backdrop-blur-none"
-              : "glass-shell rounded-2xl border border-white/20 bg-white/10 backdrop-blur-xl"
+              : isNightActive
+                ? "glass-shell rounded-2xl border border-white/10 bg-[#0B192C]/30 backdrop-blur-xl"
+                : "glass-shell rounded-2xl border border-white/20 bg-white/10 backdrop-blur-xl"
               }`}
           >
             {compact ? null : (
@@ -510,6 +532,19 @@ export function ProtectedSidebarLayout({
                       >
                         Claro cristal
                       </button>
+                      <div className="mx-1 my-1.5 h-px bg-white/12" />
+                      <div className="flex items-center justify-between px-3 py-1.5 text-sm text-white/90">
+                        <span>Automático</span>
+                        <label className="relative inline-flex items-center cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={automaticTheme}
+                            onChange={() => setAutomaticTheme(!automaticTheme)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-8 h-5 bg-white/20 rounded-full peer peer-focus:ring-0 peer-checked:after:translate-x-3 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all duration-300 peer-checked:bg-cyan-400" />
+                        </label>
+                      </div>
                     </div>
                   ) : null}
                 </div>
@@ -538,7 +573,14 @@ export function ProtectedSidebarLayout({
       </aside>
 
       <section className="relative z-10 min-w-0 flex-1 p-2 md:p-2">
-        <div id="contentSidebar" className="h-full overflow-hidden rounded-3xl border border-white/20 bg-white/16 p-2 backdrop-blur-md">
+        <div
+          id="contentSidebar"
+          className={`h-full overflow-hidden rounded-3xl p-2 backdrop-blur-md transition-all duration-500 ${
+            isNightActive
+              ? "border border-white/10 bg-[#0B192C]/40 text-slate-100"
+              : "border border-white/20 bg-white/16 text-inherit"
+          }`}
+        >
 
 
           {children ?? (
