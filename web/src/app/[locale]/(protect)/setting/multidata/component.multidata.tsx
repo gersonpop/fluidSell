@@ -379,8 +379,8 @@ export function DataManager({actorId, actorRole, companyId}: Props) {
   };
 
   return (
-    <section className="h-full w-full rounded-2xl border border-slate-200 bg-white p-4 text-slate-700 sm:p-5">
-      <div className="flex flex-col gap-4">
+    <section className="h-full w-full flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 text-slate-700 sm:p-5">
+      <div className="flex flex-col gap-4 shrink-0">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <input
             value={search}
@@ -443,11 +443,11 @@ export function DataManager({actorId, actorRole, companyId}: Props) {
         </div>
       </div>
 
-      {loading ? <p className="mt-4 text-sm text-slate-500">Cargando datos...</p> : null}
+      {loading ? <p className="mt-4 text-sm text-slate-500 shrink-0">Cargando datos...</p> : null}
 
       {!loading ? (
-        <>
-          <div className="mt-4 overflow-auto rounded-2xl border border-slate-200">
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          <div className="flex-1 overflow-y-auto rounded-2xl border border-slate-200">
             <table className="min-w-full border-collapse text-sm">
               <thead className="bg-slate-100 text-left text-slate-500">
                 <tr>
@@ -522,7 +522,7 @@ export function DataManager({actorId, actorRole, companyId}: Props) {
             </table>
           </div>
 
-          <div className="mt-4 flex flex-col items-start justify-between gap-3 text-sm text-slate-500 sm:flex-row sm:items-center">
+          <div className="mt-4 flex flex-col items-start justify-between gap-3 text-sm text-slate-500 sm:flex-row sm:items-center shrink-0">
             <p>0 de {filteredRows.length} en seleccion</p>
             <div className="flex items-center gap-2">
               <button type="button" onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={safePage <= 1} className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40">{t("pagination.previous")}</button>
@@ -531,7 +531,7 @@ export function DataManager({actorId, actorRole, companyId}: Props) {
               <button type="button" onClick={() => setPage((prev) => Math.min(pages, prev + 1))} disabled={safePage >= pages} className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40">{t("pagination.next")}</button>
             </div>
           </div>
-        </>
+        </div>
       ) : null}
 
       {openDrawer ? (

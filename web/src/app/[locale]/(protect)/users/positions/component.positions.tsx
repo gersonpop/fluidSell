@@ -447,21 +447,19 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
   }
 
   if (loading && roles.length === 0) {
-    return <section className="rounded-2xl border border-slate-200 bg-white p-5 text-slate-600">Cargando Cargos...</section>;
+    return <section className="flex-1 flex flex-col min-h-0 overflow-hidden text-slate-600 bg-white rounded-2xl border border-slate-200 p-5">Cargando Cargos...</section>;
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 text-slate-700 sm:p-5">
-      <article className="space-y-4">
-        <header>
+    <section className="flex-1 flex flex-col min-h-0 overflow-hidden text-slate-700 bg-white rounded-2xl border border-slate-200 p-4 sm:p-5">
+      <article className="flex flex-col gap-4 flex-1 min-h-0 overflow-hidden">
+        <header className="flex-shrink-0">
           <h2 className="text-2xl font-semibold">Administración de Cargos</h2>
           <p className="text-sm text-slate-500">Crea y administra los cargos (roles) del sistema desde BD usando API dinámica.</p>
         </header>
 
-
-
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-4 flex-1 min-h-0 overflow-hidden">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between flex-shrink-0">
             <div className="grid w-full gap-2 md:grid-cols-[1fr_220px] lg:max-w-[62%]">
               <input
                 value={search}
@@ -513,7 +511,7 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
             </div>
           </div>
 
-          <div className="flex items-center justify-between text-sm text-slate-500">
+          <div className="flex items-center justify-between text-sm text-slate-500 flex-shrink-0">
             <span>{visibleRoles.length} resultados</span>
             <label className="flex items-center gap-2">
               Filas por página:
@@ -532,9 +530,9 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
             </label>
           </div>
 
-          <div className="overflow-auto rounded-2xl border border-slate-200">
+          <div className="flex-1 overflow-auto rounded-2xl border border-slate-200 min-h-0 bg-white">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-100 text-left text-slate-500">
+              <thead className="bg-slate-100 text-left text-slate-500 sticky top-0 z-10 border-b border-slate-200 select-none">
                 <tr>
                   {headerColumns.map((column) => (
                     <th key={column.key} className={`px-4 py-3 ${column.key === "actions" ? "text-center" : ""}`}>
@@ -547,14 +545,14 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
                   ))}
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-100">
                 {pagedRoles.map((item) => (
-                  <tr key={item.id} className="border-t border-slate-100">
+                  <tr key={item.id} className="hover:bg-slate-50/50 transition duration-150">
                     {headerColumns.map((column) => {
                       if (column.key === "id") return <td key={`${item.id}-id`} className="px-4 py-3 font-mono text-xs">{item.id}</td>;
                       if (column.key === "key_id") return <td key={`${item.id}-key_id`} className="px-4 py-3 font-mono font-medium">{item.key_id}</td>;
                       if (column.key === "name") return <td key={`${item.id}-name`} className="px-4 py-3 font-semibold">{item.name}</td>;
-                      if (column.key === "description") return <td key={`${item.id}-description`} className="px-4 py-3 max-w-[240px] truncate">{item.description ?? "-"}</td>;
+                      if (column.key === "description") return <td key={`${item.id}-description`} className="px-4 py-3 max-w-[240px] truncate" title={item.description || ""}>{item.description ?? "-"}</td>;
                       if (column.key === "scope") {
                         const scopeName = scopes.find(s => s.id === item.scope)?.value ?? item.scope;
                         return <td key={`${item.id}-scope`} className="px-4 py-3"><span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">{scopeName}</span></td>;
@@ -614,7 +612,7 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
             </table>
           </div>
 
-          <div className="mt-4 flex flex-col items-start justify-between gap-3 text-sm text-slate-500 sm:flex-row sm:items-center">
+          <div className="flex flex-col items-start justify-between gap-3 text-sm text-slate-500 sm:flex-row sm:items-center flex-shrink-0 pt-2">
             <p>Mostrando {pagedRoles.length} de {visibleRoles.length} cargos</p>
             <div className="flex items-center gap-2">
               <button type="button" onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={safePage <= 1} className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40">{t("pagination.previous")}</button>

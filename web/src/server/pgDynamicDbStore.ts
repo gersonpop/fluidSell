@@ -659,8 +659,8 @@ async function createPlatformUserRecord(actor: ActorContext, payload: Record<str
   const result = await getPgPool().query(
     `INSERT INTO public."PlatformUser" (
       id_user_pk, user_email, username, name, last_name, phone_number, "companyId", 
-      country_code, country_iso, dni, birth_date, gender, status, provider, avatar, position, password, created_at, updated_at
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now(),now()) returning *`,
+      country_code, country_iso, dni, birth_date, gender, status, provider, avatar, position, password, department_code, city_code, created_at, updated_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,now(),now()) returning *`,
     [
       id, email, username, name, lastName, phone, companyId,
       countryCode, countryIso, payload.dni ? String(payload.dni) : null,
@@ -668,7 +668,9 @@ async function createPlatformUserRecord(actor: ActorContext, payload: Record<str
       payload.gender ? String(payload.gender) : null,
       status, provider, payload.avatar ? String(payload.avatar) : null,
       payload.position ? String(payload.position) : null,
-      passwordVal
+      passwordVal,
+      payload.department_code ? String(payload.department_code) : null,
+      payload.city_code ? String(payload.city_code) : null
     ]
   );
   return result.rows[0];
@@ -694,6 +696,8 @@ async function updatePlatformUserRecord(actor: ActorContext, id: string, patch: 
   const gender = patch.gender !== undefined ? (patch.gender ? String(patch.gender) : null) : row.gender;
   const avatar = patch.avatar !== undefined ? (patch.avatar ? String(patch.avatar) : null) : row.avatar;
   const position = patch.position !== undefined ? (patch.position ? String(patch.position) : null) : row.position;
+  const departmentCode = patch.department_code !== undefined ? (patch.department_code ? String(patch.department_code) : null) : row.department_code;
+  const cityCode = patch.city_code !== undefined ? (patch.city_code ? String(patch.city_code) : null) : row.city_code;
 
   // Manejo de cambio de contraseña con verificación de contraseña anterior
   if (patch.newPassword !== undefined) {
@@ -717,12 +721,12 @@ async function updatePlatformUserRecord(actor: ActorContext, id: string, patch: 
     `UPDATE public."PlatformUser" SET 
       user_email=$1, username=$2, name=$3, last_name=$4, phone_number=$5, "companyId"=$6, 
       country_code=$7, country_iso=$8, dni=$9, birth_date=$10, gender=$11, status=$12, 
-      provider=$13, avatar=$14, position=$15, updated_at=now() 
-     WHERE id_user_pk=$16 returning *`,
+      provider=$13, avatar=$14, position=$15, department_code=$16, city_code=$17, updated_at=now() 
+     WHERE id_user_pk=$18 returning *`,
     [
       email, email, name, lastName, phone, companyId,
       countryCode, countryIso, dni, birthDate, gender, status,
-      provider, avatar, position, id
+      provider, avatar, position, departmentCode, cityCode, id
     ]
   );
   return result.rows[0];

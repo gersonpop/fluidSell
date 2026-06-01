@@ -586,17 +586,15 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 text-slate-700 sm:p-5">
-      <article className="space-y-4">
-        <header>
+    <section className="h-full flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 text-slate-700 sm:p-5">
+      <article className="h-full flex flex-col overflow-hidden space-y-4">
+        <header className="shrink-0">
           <h2 className="text-2xl font-semibold">{t("title")}</h2>
           <p className="text-sm text-slate-500">{t("description")}</p>
         </header>
 
-
-
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between shrink-0">
             <div className="grid w-full gap-2 md:grid-cols-[1fr_130px_160px_195px] lg:max-w-[76%]">
               <input
                 value={search}
@@ -677,7 +675,7 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
             </div>
           </div>
 
-          <div className="flex items-center justify-between text-sm text-slate-500">
+          <div className="flex items-center justify-between text-sm text-slate-500 shrink-0">
             <span>{t("table.results", {count: visibleModules.length})}</span>
             <label className="flex items-center gap-2">
               Filas por pagina:
@@ -696,7 +694,7 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
             </label>
           </div>
 
-          <div className="overflow-auto rounded-2xl border border-slate-200">
+          <div className="flex-1 overflow-y-auto rounded-2xl border border-slate-200">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-100 text-left text-slate-500">
                 <tr>
@@ -841,7 +839,7 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
             </table>
           </div>
 
-          <div className="mt-4 flex flex-col items-start justify-between gap-3 text-sm text-slate-500 sm:flex-row sm:items-center">
+          <div className="mt-4 flex flex-col items-start justify-between gap-3 text-sm text-slate-500 sm:flex-row sm:items-center shrink-0">
             <p>0 de {visibleModules.length} en seleccion</p>
             <div className="flex items-center gap-2">
               <button type="button" onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={safePage <= 1} className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40">{t("pagination.previous")}</button>

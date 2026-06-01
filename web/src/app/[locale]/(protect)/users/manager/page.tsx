@@ -30,6 +30,7 @@ export default async function DynamicNewPage({params}: PageProps) {
     <NewPagePattern
       title={currentModule?.name ?? "manager"}
       description={currentModule?.description ?? ""}
+      plain={true}
     >
       <DynamicComponent
         currentUserEmail={session.user.email ?? undefined}

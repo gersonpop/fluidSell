@@ -33,6 +33,10 @@ type ProtectedSidebarLayoutProps = {
   children?: React.ReactNode;
 };
 
+// Persistent client-side flag to identify if hydration has already occurred.
+// This prevents layout shift and animation flashes on subsequent client-side navigations.
+let globalHasHydrated = false;
+
 export function ProtectedSidebarLayout({
   locale,
   userName,
@@ -46,7 +50,7 @@ export function ProtectedSidebarLayout({
 }: ProtectedSidebarLayoutProps) {
   const pathname = usePathname();
   const [mode, setMode] = useState<SidebarMode>(() => {
-    if (typeof window !== "undefined") {
+    if (globalHasHydrated && typeof window !== "undefined") {
       try {
         const saved = localStorage.getItem("sidebar_pref_mode") as SidebarMode | null;
         if (saved && ["compact", "auto", "fixed"].includes(saved)) {
@@ -58,7 +62,7 @@ export function ProtectedSidebarLayout({
   });
   const [hoverExpanded, setHoverExpanded] = useState(false);
   const [darkPanel, setDarkPanel] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
+    if (globalHasHydrated && typeof window !== "undefined") {
       try {
         const saved = localStorage.getItem("sidebar_pref_dark_panel");
         if (saved !== null) return saved === "true";
@@ -70,7 +74,7 @@ export function ProtectedSidebarLayout({
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
   const [automaticTheme, setAutomaticTheme] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
+    if (globalHasHydrated && typeof window !== "undefined") {
       try {
         const saved = localStorage.getItem("sidebar_pref_automatic_theme");
         if (saved !== null) return saved === "true";
@@ -79,40 +83,59 @@ export function ProtectedSidebarLayout({
     return false;
   });
   const [isSystemDark, setIsSystemDark] = useState(() => {
-    if (typeof window !== "undefined") {
+    if (globalHasHydrated && typeof window !== "undefined") {
       try {
         return window.matchMedia("(prefers-color-scheme: dark)").matches;
       } catch {}
     }
     return false;
   });
-  const [isMounted, setIsMounted] = useState(false);
+  const [isMounted, setIsMounted] = useState(() => {
+    return typeof window !== "undefined" && globalHasHydrated;
+  });
 
   useEffect(() => {
-    setIsMounted(true);
+    if (!globalHasHydrated) {
+      try {
+        const savedMode = localStorage.getItem("sidebar_pref_mode") as SidebarMode | null;
+        if (savedMode && ["compact", "auto", "fixed"].includes(savedMode)) {
+          setMode(savedMode);
+        }
+        const savedDark = localStorage.getItem("sidebar_pref_dark_panel");
+        if (savedDark !== null) {
+          setDarkPanel(savedDark === "true");
+        }
+        const savedAutoTheme = localStorage.getItem("sidebar_pref_automatic_theme");
+        if (savedAutoTheme !== null) {
+          setAutomaticTheme(savedAutoTheme === "true");
+        }
+      } catch {}
+      setIsMounted(true);
+      globalHasHydrated = true;
+    }
   }, []);
 
   // Save preferences to localStorage when they change
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!isMounted) return;
     try {
       localStorage.setItem("sidebar_pref_mode", mode);
     } catch {}
-  }, [mode]);
+  }, [mode, isMounted]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!isMounted) return;
     try {
       localStorage.setItem("sidebar_pref_dark_panel", String(darkPanel));
     } catch {}
-  }, [darkPanel]);
+  }, [darkPanel, isMounted]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!isMounted) return;
     try {
       localStorage.setItem("sidebar_pref_automatic_theme", String(automaticTheme));
     } catch {}
-  }, [automaticTheme]);
+  }, [automaticTheme, isMounted]);
 
   const navScrollRef = useRef<HTMLDivElement | null>(null);
   const [canScrollUp, setCanScrollUp] = useState(false);

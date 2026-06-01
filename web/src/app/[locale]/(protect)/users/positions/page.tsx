@@ -4,6 +4,7 @@ import {authOptions} from "@/lib/auth-options";
 import {getTranslations} from "next-intl/server";
 import {type ActorContext} from "@/server/pgDynamicDbStore";
 import {PositionsConfigClient} from "./component.positions";
+import {NewPagePattern} from "@/components/module-patterns/NewPagePattern";
 
 type PageProps = {
   params: Promise<{locale: string}>;
@@ -25,12 +26,12 @@ export default async function PositionsPage({params}: PageProps) {
   const t = await getTranslations({locale, namespace: "AccountConfig"});
 
   return (
-    <section className="h-full w-full rounded-2xl border border-slate-200 bg-white p-5 text-slate-700">
-      <h1 id="titleNewPage" className="text-2xl font-semibold">Configuración de Cargos</h1>
-      <p className="mt-2 text-sm text-slate-500">Crea y administra los cargos de la aplicación desde BD usando API dinámica.</p>
-      <div className="mt-4">
-        <PositionsConfigClient actorId={actor.actorId} actorRole={actor.role} companyId={actor.companyId} />
-      </div>
-    </section>
+    <NewPagePattern
+      title="Cargos"
+      description="Crea y administra los cargos de la aplicación desde BD usando API dinámica."
+      plain={true}
+    >
+      <PositionsConfigClient actorId={actor.actorId} actorRole={actor.role} companyId={actor.companyId} />
+    </NewPagePattern>
   );
 }

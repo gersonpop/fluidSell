@@ -40,6 +40,9 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
   const [companiesList, setCompaniesList] = useState<any[]>([]);
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [activeDrawerTab, setActiveDrawerTab] = useState<"personal" | "system">("personal");
+  const [statesList, setStatesList] = useState<any[]>([]);
+  const [citiesList, setCitiesList] = useState<any[]>([]);
 
   // Estados para la gestión de cambio de contraseña
   const [showChangePasswordPanel, setShowChangePasswordPanel] = useState(false);
@@ -99,7 +102,9 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
     avatar: "",
     position: "Staff",
     password: "",
-    confirmPassword: ""
+    confirmPassword: "",
+    department_code: "",
+    city_code: ""
   });
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -167,20 +172,24 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [usersRes, rolesRes, assignmentsRes, countriesRes, companiesRes] = await Promise.all([
+      const [usersRes, rolesRes, assignmentsRes, countriesRes, companiesRes, statesRes, citiesRes] = await Promise.all([
         fetch("/api/v1/db/users", { headers }),
         fetch("/api/v1/db/roles", { headers }),
         fetch("/api/v1/db/role_assignments", { headers }),
         fetch("/api/v1/db/st_country", { headers }).catch(() => null),
-        isSU ? fetch("/api/v1/db/companies", { headers }).catch(() => null) : null
+        isSU ? fetch("/api/v1/db/companies", { headers }).catch(() => null) : null,
+        fetch("/api/v1/db/st_state", { headers }).catch(() => null),
+        fetch("/api/v1/db/st_city", { headers }).catch(() => null)
       ]);
 
-      const [usersBody, rolesBody, assignmentsBody, countriesBody, companiesBody] = await Promise.all([
+      const [usersBody, rolesBody, assignmentsBody, countriesBody, companiesBody, statesBody, citiesBody] = await Promise.all([
         usersRes.json(),
         rolesRes.json(),
         assignmentsRes.json(),
         countriesRes ? countriesRes.json().catch(() => null) : null,
-        companiesRes ? companiesRes.json().catch(() => null) : null
+        companiesRes ? companiesRes.json().catch(() => null) : null,
+        statesRes ? statesRes.json().catch(() => null) : null,
+        citiesRes ? citiesRes.json().catch(() => null) : null
       ]);
 
       if (!usersRes.ok) throw new Error(usersBody?.message || "No se pudo cargar la lista de usuarios");
@@ -189,6 +198,8 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
       const rolesData = Array.isArray(rolesBody?.data) ? rolesBody.data : [];
       const assignmentsData = Array.isArray(assignmentsBody?.data) ? assignmentsBody.data : [];
       const companiesData = companiesBody && Array.isArray(companiesBody?.data) ? companiesBody.data : [];
+      const statesData = statesBody && Array.isArray(statesBody?.data) ? statesBody.data : [];
+      const citiesData = citiesBody && Array.isArray(citiesBody?.data) ? citiesBody.data : [];
       
       let countriesData = countriesBody && Array.isArray(countriesBody?.data) ? countriesBody.data : [];
       if (countriesData.length === 0) {
@@ -208,6 +219,8 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
       setAssignmentsList(assignmentsData);
       setCountriesList(countriesData);
       setCompaniesList(companiesData);
+      setStatesList(statesData);
+      setCitiesList(citiesData);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Error al cargar datos", "error");
       setRows([]);
@@ -275,9 +288,12 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
       avatar: "",
       position: "Staff",
       password: "",
-      confirmPassword: ""
+      confirmPassword: "",
+      department_code: "",
+      city_code: ""
     });
     setSelectedRoleId("");
+    setActiveDrawerTab("personal");
     setOpenDrawer(true);
     window.setTimeout(() => setDrawerVisible(true), 10);
   };
@@ -307,11 +323,14 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
       avatar: initialAvatar,
       position: String(row?.position || "Staff"),
       password: "",
-      confirmPassword: ""
+      confirmPassword: "",
+      department_code: String(row?.department_code || row?.departmentCode || ""),
+      city_code: String(row?.city_code || row?.cityCode || "")
     });
 
     const currentAssignment = assignmentsList.find((a) => a.platform_user_id === row?.id_user_pk);
     setSelectedRoleId(currentAssignment ? currentAssignment.roleId : "");
+    setActiveDrawerTab("personal");
     setOpenDrawer(true);
     window.setTimeout(() => setDrawerVisible(true), 10);
   };
@@ -320,6 +339,7 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
     setDrawerVisible(false);
     setShowChangePasswordPanel(false);
     setPwdForm({ oldPassword: "", newPassword: "", confirmPassword: "" });
+    setActiveDrawerTab("personal");
     window.setTimeout(() => setOpenDrawer(false), 220);
   };
 
@@ -541,11 +561,23 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
     });
   }, [rolesList, currentUserRole]);
 
+  const filteredStates = useMemo(() => {
+    return statesList.filter(
+      (s) => String(s.iso_country || s.isoCountry || s.iso || "").toLowerCase() === String(form.country_iso || "").toLowerCase()
+    );
+  }, [statesList, form.country_iso]);
+
+  const filteredCities = useMemo(() => {
+    return citiesList.filter(
+      (c) => String(c.state_id || c.stateId || "") === String(form.department_code || "")
+    );
+  }, [citiesList, form.department_code]);
+
 
   return (
-    <section className="h-full w-full rounded-2xl border border-slate-200 bg-white p-4 text-slate-700 sm:p-5 shadow-sm">
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+    <section className="flex-1 flex flex-col min-h-0 overflow-hidden text-slate-700 bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm">
+      <div className="flex flex-col gap-4 flex-1 min-h-0 overflow-hidden">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between flex-shrink-0">
           <input
             value={search}
             onChange={(event) => {
@@ -594,14 +626,14 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
             <button
               type="button"
               onClick={openAddDrawer}
-              className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 transition"
+              className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition"
             >
               Agregar Usuario
             </button>
           </div>
         </div>
 
-        <div className="flex items-center justify-between text-sm text-slate-500">
+        <div className="flex items-center justify-between text-sm text-slate-500 flex-shrink-0">
           <p>Total {filteredRows.length} usuarios encontrados</p>
           <label className="flex items-center gap-2">
             Filas por página:
@@ -619,15 +651,14 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
             </select>
           </label>
         </div>
-      </div>
 
-      {loading ? <p className="mt-6 text-sm text-slate-500">Cargando usuarios...</p> : null}
+      {loading ? <p className="flex-shrink-0 mt-6 text-sm text-slate-500">Cargando usuarios...</p> : null}
 
       {!loading ? (
         <>
-          <div className="mt-4 overflow-auto rounded-2xl border border-slate-200">
+          <div className="flex-1 overflow-auto rounded-2xl border border-slate-200 min-h-0 bg-white">
             <table className="min-w-full border-collapse text-sm">
-              <thead className="bg-slate-50 text-left text-slate-500 font-medium">
+              <thead className="bg-slate-50 text-left text-slate-500 font-medium sticky top-0 z-10 border-b border-slate-200 select-none">
                 <tr className="border-b border-slate-200">
                   {headerColumns.map((column) => (
                     <th key={column.key} className={`px-4 py-3 font-semibold text-slate-600 ${column.key === "actions" ? "text-center" : ""}`}>{column.label}</th>
@@ -752,33 +783,34 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
                 ) : null}
               </tbody>
             </table>
-          </div>
-
-          <div className="mt-4 flex flex-col items-center justify-between gap-3 text-sm text-slate-500 sm:flex-row">
-            <p>Mostrando {pagedRows.length} de {filteredRows.length} registros</p>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                disabled={safePage <= 1}
-                className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40 hover:bg-slate-50 transition"
-              >
-                Anterior
-              </button>
-              <span className="rounded-lg bg-blue-600 px-3 py-1 text-white text-xs font-semibold">{safePage}</span>
-              <span>de {pages}</span>
-              <button
-                type="button"
-                onClick={() => setPage((prev) => Math.min(pages, prev + 1))}
-                disabled={safePage >= pages}
-                className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40 hover:bg-slate-50 transition"
-              >
-                Siguiente
-              </button>
             </div>
-          </div>
-        </>
-      ) : null}
+
+            <div className="flex flex-col items-center justify-between gap-3 text-sm text-slate-500 sm:flex-row flex-shrink-0 pt-2 border-t border-slate-100">
+              <p>Mostrando {pagedRows.length} de {filteredRows.length} registros</p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                  disabled={safePage <= 1}
+                  className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40 hover:bg-slate-50 transition"
+                >
+                  Anterior
+                </button>
+                <span className="rounded-lg bg-blue-600 px-3 py-1 text-white text-xs font-semibold">{safePage}</span>
+                <span>de {pages}</span>
+                <button
+                  type="button"
+                  onClick={() => setPage((prev) => Math.min(pages, prev + 1))}
+                  disabled={safePage >= pages}
+                  className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40 hover:bg-slate-50 transition"
+                >
+                  Siguiente
+                </button>
+              </div>
+            </div>
+          </>
+        ) : null}
+      </div>
 
       {openDrawer ? (
         <div className="fixed inset-0 z-50">
@@ -896,253 +928,330 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="text-xs font-semibold text-slate-500">Primer Nombre *</span>
-                  <input
-                    value={form.name}
-                    onChange={(event) => setFormField("name", event.target.value)}
-                    placeholder="Ej. Gerson"
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-semibold text-slate-500">Apellidos *</span>
-                  <input
-                    value={form.last_name}
-                    onChange={(event) => setFormField("last_name", event.target.value)}
-                    placeholder="Ej. Porras"
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
-                  />
-                </label>
+              {/* SELECTOR DE PESTAÑAS (TABS) */}
+              <div className="flex border-b border-slate-100 mt-5 select-none">
+                <button
+                  type="button"
+                  onClick={() => setActiveDrawerTab("personal")}
+                  className={`flex-1 pb-3 text-center text-sm font-semibold border-b-2 transition duration-200 cursor-pointer ${
+                    activeDrawerTab === "personal"
+                      ? "border-blue-600 text-blue-600"
+                      : "border-transparent text-slate-400 hover:text-slate-600"
+                  }`}
+                >
+                  Información Personal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveDrawerTab("system")}
+                  className={`flex-1 pb-3 text-center text-sm font-semibold border-b-2 transition duration-200 cursor-pointer ${
+                    activeDrawerTab === "system"
+                      ? "border-blue-600 text-blue-600"
+                      : "border-transparent text-slate-400 hover:text-slate-600"
+                  }`}
+                >
+                  Acceso y Sistema
+                </button>
               </div>
 
-              <div className="grid grid-cols-12 gap-3">
-                {/* Selector de País (col-span-5) */}
-                <label className="col-span-5 block">
-                  <span className="text-xs font-semibold text-slate-500">País / Prefijo</span>
-                  <select
-                    value={form.country_iso}
-                    onChange={(event) => {
-                      const selectedIso = event.target.value;
-                      const country = countriesList.find((c) => c.iso === selectedIso);
-                      if (country) {
-                        setForm((prev) => ({
-                          ...prev,
-                          country_iso: country.iso,
-                          country_code: country.prefix_area || country.prefix || ""
-                        }));
-                      }
-                    }}
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
-                  >
-                    {countriesList.map((c) => (
-                      <option key={c.iso} value={c.iso}>
-                        {c.nombre} ({c.prefix_area || c.prefix || c.iso})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                {/* Teléfono sin prefijo (col-span-7) */}
-                <label className="col-span-7 block">
-                  <span className="text-xs font-semibold text-slate-500">Teléfono *</span>
-                  <div className="mt-1 flex rounded-xl border border-slate-200 bg-slate-50 overflow-hidden focus-within:border-blue-400 transition">
-                    <span className="flex items-center bg-slate-100/80 px-3 text-xs font-semibold text-slate-500 border-r border-slate-200 select-none">
-                      {form.country_code || "+57"}
-                    </span>
-                    <input
-                      value={form.phone_number}
-                      onChange={(event) => setFormField("phone_number", event.target.value)}
-                      placeholder="3001234567"
-                      className="w-full bg-transparent px-3 py-2 text-sm outline-none"
-                    />
+              {/* CONTENIDO DE PESTAÑAS */}
+              {activeDrawerTab === "personal" ? (
+                <div className="space-y-4 animate-fade-in">
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="text-xs font-semibold text-slate-500">Primer Nombre *</span>
+                      <input
+                        value={form.name}
+                        onChange={(event) => setFormField("name", event.target.value)}
+                        placeholder="Ej. Gerson"
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-semibold text-slate-500">Apellidos *</span>
+                      <input
+                        value={form.last_name}
+                        onChange={(event) => setFormField("last_name", event.target.value)}
+                        placeholder="Ej. Porras"
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
+                      />
+                    </label>
                   </div>
-                </label>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="text-xs font-semibold text-slate-500">Proveedor</span>
-                  <select
-                    value={form.provider}
-                    onChange={(event) => setFormField("provider", event.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
-                  >
-                    {providerOptions.map((opt) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="text-xs font-semibold text-slate-500">Compañía *</span>
-                  <select
-                    value={form.companyId}
-                    disabled={!isSU}
-                    onChange={(event) => setFormField("companyId", event.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:opacity-50 transition"
-                  >
-                    {isSU ? (
-                      <>
-                        <option value="">-- Seleccionar Empresa --</option>
-                        {companiesList.map((comp) => (
-                          <option key={comp.id} value={comp.id}>
-                            {comp.commercialName || comp.legalName || comp.id}
+                  <div className="grid grid-cols-12 gap-3">
+                    {/* Selector de País (col-span-5) */}
+                    <label className="col-span-5 block">
+                      <span className="text-xs font-semibold text-slate-500">País / Prefijo</span>
+                      <select
+                        value={form.country_iso}
+                        onChange={(event) => {
+                          const selectedIso = event.target.value;
+                          const country = countriesList.find((c) => c.iso === selectedIso);
+                          if (country) {
+                            setForm((prev) => ({
+                              ...prev,
+                              country_iso: country.iso,
+                              country_code: country.prefix_area || country.prefix || "",
+                              department_code: "",
+                              city_code: ""
+                            }));
+                          }
+                        }}
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
+                      >
+                        {countriesList.map((c) => (
+                          <option key={c.iso} value={c.iso}>
+                            {c.nombre} ({c.prefix_area || c.prefix || c.iso})
                           </option>
                         ))}
-                      </>
-                    ) : (
-                      <option value={form.companyId || currentUserCompanyId || "900000000"}>
-                        {form.companyId || currentUserCompanyId || "Empresa Activa"}
-                      </option>
-                    )}
-                  </select>
-                </label>
-              </div>
+                      </select>
+                    </label>
 
-              <div className="grid grid-cols-3 gap-3">
-                <label className="block">
-                  <span className="text-xs font-semibold text-slate-500">Estado</span>
-                  <select
-                    value={form.status}
-                    onChange={(event) => setFormField("status", event.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
-                  >
-                    <option value="active">Activo</option>
-                    <option value="inactive">Inactivo</option>
-                    <option value="pending_approval">Pendiente</option>
-                  </select>
-                </label>
-                <label className="block col-span-2">
-                  <span className="text-xs font-semibold text-slate-500">Género</span>
-                  <select
-                    value={form.gender}
-                    onChange={(event) => setFormField("gender", event.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
-                  >
-                    <option value="male">Masculino</option>
-                    <option value="female">Femenino</option>
-                    <option value="other">Otro</option>
-                  </select>
-                </label>
-              </div>
+                    {/* Teléfono sin prefijo (col-span-7) */}
+                    <label className="col-span-7 block">
+                      <span className="text-xs font-semibold text-slate-500">Teléfono *</span>
+                      <div className="mt-1 flex rounded-xl border border-slate-200 bg-slate-50 overflow-hidden focus-within:border-blue-400 transition">
+                        <span className="flex items-center bg-slate-100/80 px-3 text-xs font-semibold text-slate-500 border-r border-slate-200 select-none">
+                          {form.country_code || "+57"}
+                        </span>
+                        <input
+                          value={form.phone_number}
+                          onChange={(event) => setFormField("phone_number", event.target.value)}
+                          placeholder="3001234567"
+                          className="w-full bg-transparent px-3 py-2 text-sm outline-none"
+                        />
+                      </div>
+                    </label>
+                  </div>
 
-              {/* CONTRASEÑA EN MODO CREACIÓN (MANUAL) */}
-              {actionMode === "add" && form.provider === "manual" && (
-                <div className="grid grid-cols-2 gap-3 mt-4 animate-slide-in">
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="text-xs font-semibold text-slate-500">Departamento / Estado</span>
+                      <select
+                        value={form.department_code}
+                        onChange={(event) => {
+                          const selectedStateId = event.target.value;
+                          setForm((prev) => ({
+                            ...prev,
+                            department_code: selectedStateId,
+                            city_code: ""
+                          }));
+                        }}
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
+                      >
+                        <option value="">-- Seleccionar --</option>
+                        {filteredStates.map((s) => (
+                          <option key={s.id_state || s.idState || s.id} value={s.id_state || s.idState || s.id}>
+                            {s.state}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="block">
+                      <span className="text-xs font-semibold text-slate-500">Ciudad</span>
+                      <select
+                        value={form.city_code}
+                        disabled={!form.department_code}
+                        onChange={(event) => setFormField("city_code", event.target.value)}
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:opacity-50 transition"
+                      >
+                        <option value="">-- Seleccionar --</option>
+                        {filteredCities.map((c) => (
+                          <option key={c.id_city || c.idCity || c.id} value={c.id_city || c.idCity || c.id}>
+                            {c.city}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
                   <label className="block">
-                    <span className="text-xs font-semibold text-slate-500">Contraseña de acceso *</span>
-                    <input
-                      type="password"
-                      value={form.password}
-                      onChange={(event) => setFormField("password", event.target.value)}
-                      placeholder="Por defecto: DNI**"
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="text-xs font-semibold text-slate-500">Confirmar Contraseña *</span>
-                    <input
-                      type="password"
-                      value={form.confirmPassword}
-                      onChange={(event) => setFormField("confirmPassword", event.target.value)}
-                      placeholder="Repite la contraseña"
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
-                    />
+                    <span className="text-xs font-semibold text-slate-500">Género</span>
+                    <select
+                      value={form.gender}
+                      onChange={(event) => setFormField("gender", event.target.value)}
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
+                    >
+                      <option value="male">Masculino</option>
+                      <option value="female">Femenino</option>
+                      <option value="other">Otro</option>
+                    </select>
                   </label>
                 </div>
-              )}
+              ) : (
+                <div className="space-y-4 animate-fade-in">
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="text-xs font-semibold text-slate-500">Compañía *</span>
+                      <select
+                        value={form.companyId}
+                        disabled={!isSU}
+                        onChange={(event) => setFormField("companyId", event.target.value)}
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:opacity-50 transition"
+                      >
+                        {isSU ? (
+                          <>
+                            <option value="">-- Seleccionar Empresa --</option>
+                            {companiesList.map((comp) => (
+                              <option key={comp.id} value={comp.id}>
+                                {comp.commercialName || comp.legalName || comp.id}
+                              </option>
+                            ))}
+                          </>
+                        ) : (
+                          <option value={form.companyId || currentUserCompanyId || "900000000"}>
+                            {form.companyId || currentUserCompanyId || "Empresa Activa"}
+                          </option>
+                        )}
+                      </select>
+                    </label>
 
-              {/* GESTIÓN DE CONTRASEÑA EN MODO EDICIÓN (MANUAL) */}
-              {actionMode === "edit" && form.provider === "manual" && (
-                <div className="mt-4 border-t border-slate-100 pt-4 space-y-3">
-                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide select-none">Gestionar Contraseña</h4>
-                  
-                  {!showChangePasswordPanel ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowChangePasswordPanel(true)}
-                      className="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50/50 px-4 py-2.5 text-xs font-semibold text-slate-700 transition cursor-pointer select-none"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="w-4 h-4 text-slate-500">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0V10.5m-2.25 13.5h13.5c1.242 0 2.25-1.008 2.25-2.25V12c0-1.242-1.008-2.25-2.25-2.25H5.25C4.008 9.75 3 10.758 3 12v9.75c0 1.242 1.008 2.25 2.25 2.25Z" />
-                      </svg>
-                      Cambiar Contraseña de Acceso
-                    </button>
-                  ) : (
-                    <div className="rounded-2xl border border-slate-100 bg-slate-50/40 p-4 space-y-3">
+                    <label className="block">
+                      <span className="text-xs font-semibold text-slate-500">Asignar Cargo / Rol *</span>
+                      <select
+                        value={selectedRoleId}
+                        onChange={(event) => setSelectedRoleId(event.target.value)}
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
+                      >
+                        <option value="">Ninguno (Sin Rol)</option>
+                        {filteredRolesList.map((role) => (
+                          <option key={role.id} value={role.id}>
+                            {role.name} ({role.scope})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="text-xs font-semibold text-slate-500">Estado</span>
+                      <select
+                        value={form.status}
+                        onChange={(event) => setFormField("status", event.target.value)}
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
+                      >
+                        <option value="active">Activo</option>
+                        <option value="inactive">Inactivo</option>
+                        <option value="pending_approval">Pendiente</option>
+                      </select>
+                    </label>
+
+                    <label className="block">
+                      <span className="text-xs font-semibold text-slate-500">Proveedor</span>
+                      <select
+                        value={form.provider}
+                        onChange={(event) => setFormField("provider", event.target.value)}
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
+                      >
+                        {providerOptions.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  {/* CONTRASEÑA EN MODO CREACIÓN (MANUAL) */}
+                  {actionMode === "add" && form.provider === "manual" && (
+                    <div className="grid grid-cols-2 gap-3 mt-4 animate-slide-in">
                       <label className="block">
-                        <span className="text-[11px] font-semibold text-slate-500">Contraseña Anterior *</span>
+                        <span className="text-xs font-semibold text-slate-500">Contraseña de acceso *</span>
                         <input
                           type="password"
-                          value={pwdForm.oldPassword}
-                          onChange={(e) => setPwdForm(prev => ({ ...prev, oldPassword: e.target.value }))}
-                          placeholder="Ingresa contraseña actual"
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-1.5 text-xs outline-none focus:border-blue-400 transition"
+                          value={form.password}
+                          onChange={(event) => setFormField("password", event.target.value)}
+                          placeholder="Por defecto: DNI**"
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
                         />
                       </label>
                       <label className="block">
-                        <span className="text-[11px] font-semibold text-slate-500">Nueva Contraseña *</span>
+                        <span className="text-xs font-semibold text-slate-500">Confirmar Contraseña *</span>
                         <input
                           type="password"
-                          value={pwdForm.newPassword}
-                          onChange={(e) => setPwdForm(prev => ({ ...prev, newPassword: e.target.value }))}
-                          placeholder="Nueva contraseña"
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-1.5 text-xs outline-none focus:border-blue-400 transition"
+                          value={form.confirmPassword}
+                          onChange={(event) => setFormField("confirmPassword", event.target.value)}
+                          placeholder="Repite la contraseña"
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
                         />
                       </label>
-                      <label className="block">
-                        <span className="text-[11px] font-semibold text-slate-500">Confirmar Nueva Contraseña *</span>
-                        <input
-                          type="password"
-                          value={pwdForm.confirmPassword}
-                          onChange={(e) => setPwdForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
-                          placeholder="Confirma nueva contraseña"
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-1.5 text-xs outline-none focus:border-blue-400 transition"
-                        />
-                      </label>
-                      <div className="flex justify-end gap-2 pt-1 select-none">
+                    </div>
+                  )}
+
+                  {/* GESTIÓN DE CONTRASEÑA EN MODO EDICIÓN (MANUAL) */}
+                  {actionMode === "edit" && form.provider === "manual" && (
+                    <div className="mt-4 border-t border-slate-100 pt-4 space-y-3">
+                      <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide select-none">Gestionar Contraseña</h4>
+                      
+                      {!showChangePasswordPanel ? (
                         <button
                           type="button"
-                          onClick={() => {
-                            setShowChangePasswordPanel(false);
-                            setPwdForm({ oldPassword: "", newPassword: "", confirmPassword: "" });
-                          }}
-                          className="rounded-lg border border-slate-200 hover:bg-slate-50 px-3 py-1.5 text-[11px] font-semibold text-slate-600 transition cursor-pointer"
+                          onClick={() => setShowChangePasswordPanel(true)}
+                          className="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50/50 px-4 py-2.5 text-xs font-semibold text-slate-700 transition cursor-pointer select-none"
                         >
-                          Cancelar
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="w-4 h-4 text-slate-500">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0V10.5m-2.25 13.5h13.5c1.242 0 2.25-1.008 2.25-2.25V12c0-1.242-1.008-2.25-2.25-2.25H5.25C4.008 9.75 3 10.758 3 12v9.75c0 1.242 1.008 2.25 2.25 2.25Z" />
+                          </svg>
+                          Cambiar Contraseña de Acceso
                         </button>
-                        <button
-                          type="button"
-                          onClick={handleChangePassword}
-                          className="rounded-lg bg-blue-600 hover:bg-blue-700 px-3.5 py-1.5 text-[11px] font-bold text-white transition shadow-sm cursor-pointer"
-                        >
-                          Actualizar Contraseña
-                        </button>
-                      </div>
+                      ) : (
+                        <div className="rounded-2xl border border-slate-100 bg-slate-50/40 p-4 space-y-3">
+                          <label className="block">
+                            <span className="text-[11px] font-semibold text-slate-500">Contraseña Anterior *</span>
+                            <input
+                              type="password"
+                              value={pwdForm.oldPassword}
+                              onChange={(e) => setPwdForm(prev => ({ ...prev, oldPassword: e.target.value }))}
+                              placeholder="Ingresa contraseña actual"
+                              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-1.5 text-xs outline-none focus:border-blue-400 transition"
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="text-[11px] font-semibold text-slate-500">Nueva Contraseña *</span>
+                            <input
+                              type="password"
+                              value={pwdForm.newPassword}
+                              onChange={(e) => setPwdForm(prev => ({ ...prev, newPassword: e.target.value }))}
+                              placeholder="Nueva contraseña"
+                              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-1.5 text-xs outline-none focus:border-blue-400 transition"
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="text-[11px] font-semibold text-slate-500">Confirmar Nueva Contraseña *</span>
+                            <input
+                              type="password"
+                              value={pwdForm.confirmPassword}
+                              onChange={(e) => setPwdForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                              placeholder="Confirma nueva contraseña"
+                              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-1.5 text-xs outline-none focus:border-blue-400 transition"
+                            />
+                          </label>
+                          <div className="flex justify-end gap-2 pt-1 select-none">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowChangePasswordPanel(false);
+                                setPwdForm({ oldPassword: "", newPassword: "", confirmPassword: "" });
+                              }}
+                              className="rounded-lg border border-slate-200 hover:bg-slate-50 px-3 py-1.5 text-[11px] font-semibold text-slate-600 transition cursor-pointer"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleChangePassword}
+                              className="rounded-lg bg-blue-600 hover:bg-blue-700 px-3.5 py-1.5 text-[11px] font-bold text-white transition shadow-sm cursor-pointer"
+                            >
+                              Actualizar Contraseña
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block col-span-2">
-                  <span className="text-xs font-semibold text-slate-500">Asignar Cargo / Rol *</span>
-                  <select
-                    value={selectedRoleId}
-                    onChange={(event) => setSelectedRoleId(event.target.value)}
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
-                  >
-                    <option value="">Ninguno (Sin Rol)</option>
-                    {filteredRolesList.map((role) => (
-                      <option key={role.id} value={role.id}>
-                        {role.name} ({role.scope})
-                      </option>
-                    ))}
-                  </select>
-                </label>
               </div>
-            </div>
 
             <div className="mt-8 border-t border-slate-100 pt-5 flex justify-end gap-3">
               <button
