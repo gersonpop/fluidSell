@@ -22,6 +22,7 @@ type UserRecord = {
   gender: string;
   status: OnboardingStatus;
   provider: SocialProvider;
+  avatar?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -40,6 +41,7 @@ export type OnboardingSubmitInput = {
   birthDate: string;
   gender: string;
   provider: SocialProvider;
+  avatar?: string;
 };
 
 type CatalogDb = {
@@ -133,6 +135,7 @@ function mapRowToUser(row: Record<string, unknown>): UserRecord {
     gender: String(row.gender),
     status: normalizeStatus(String(row.status)),
     provider: String(row.provider ?? "google") as SocialProvider,
+    avatar: row.avatar ? String(row.avatar) : undefined,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
   };
@@ -357,9 +360,9 @@ export async function submitSocialOnboarding(input: OnboardingSubmitInput) {
   await getPool().query(
     `
       INSERT INTO "PlatformUser" (
-        "id_user_pk","user_email","username","name","last_name","phone_number","companyId","country_code","country_iso","department_code","city_code","dni","birth_date","gender","status","provider","created_at","updated_at"
+        "id_user_pk","user_email","username","name","last_name","phone_number","companyId","country_code","country_iso","department_code","city_code","dni","birth_date","gender","status","provider","avatar","created_at","updated_at"
       ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NOW(),NOW()
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW(),NOW()
       )
       ON CONFLICT ("user_email")
       DO UPDATE SET
@@ -376,6 +379,7 @@ export async function submitSocialOnboarding(input: OnboardingSubmitInput) {
         "gender"=EXCLUDED."gender",
         "status"=EXCLUDED."status",
         "provider"=EXCLUDED."provider",
+        "avatar"=EXCLUDED."avatar",
         "updated_at"=NOW()
     `,
     [
@@ -394,7 +398,8 @@ export async function submitSocialOnboarding(input: OnboardingSubmitInput) {
       input.birthDate,
       input.gender,
       "pending_approval",
-      input.provider
+      input.provider,
+      input.avatar ?? null
     ]
   );
 

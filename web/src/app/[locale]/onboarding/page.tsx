@@ -32,6 +32,7 @@ export default async function OnboardingPage({params}: OnboardingPageProps) {
       email={session.user.email}
       provider={provider}
       defaultFullName={session.user.name ?? ""}
+      defaultAvatar={typeof session.user.image === "string" ? session.user.image : ""}
     />
   );
 }

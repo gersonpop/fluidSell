@@ -104,7 +104,8 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
     password: "",
     confirmPassword: "",
     department_code: "",
-    city_code: ""
+    city_code: "",
+    birth_date: ""
   });
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -290,7 +291,8 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
       password: "",
       confirmPassword: "",
       department_code: "",
-      city_code: ""
+      city_code: "",
+      birth_date: ""
     });
     setSelectedRoleId("");
     setActiveDrawerTab("personal");
@@ -325,7 +327,8 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
       password: "",
       confirmPassword: "",
       department_code: String(row?.department_code || row?.departmentCode || ""),
-      city_code: String(row?.city_code || row?.cityCode || "")
+      city_code: String(row?.city_code || row?.cityCode || ""),
+      birth_date: row?.birth_date || row?.birthDate ? String(row.birth_date || row.birthDate).slice(0, 10) : ""
     });
 
     const currentAssignment = assignmentsList.find((a) => a.platform_user_id === row?.id_user_pk);
@@ -1066,18 +1069,30 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
                     </label>
                   </div>
 
-                  <label className="block">
-                    <span className="text-xs font-semibold text-slate-500">Género</span>
-                    <select
-                      value={form.gender}
-                      onChange={(event) => setFormField("gender", event.target.value)}
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
-                    >
-                      <option value="male">Masculino</option>
-                      <option value="female">Femenino</option>
-                      <option value="other">Otro</option>
-                    </select>
-                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="text-xs font-semibold text-slate-500">Género</span>
+                      <select
+                        value={form.gender}
+                        onChange={(event) => setFormField("gender", event.target.value)}
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
+                      >
+                        <option value="male">Masculino</option>
+                        <option value="female">Femenino</option>
+                        <option value="other">Otro</option>
+                      </select>
+                    </label>
+
+                    <label className="block">
+                      <span className="text-xs font-semibold text-slate-500">Fecha de Nacimiento</span>
+                      <input
+                        type="date"
+                        value={form.birth_date}
+                        onChange={(event) => setFormField("birth_date", event.target.value)}
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white transition"
+                      />
+                    </label>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-4 animate-fade-in">

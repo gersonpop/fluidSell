@@ -17,6 +17,7 @@ export async function POST(request: Request) {
       birthDate: string;
       gender: string;
       provider: "google" | "facebook" | "linkedin";
+      avatar?: string;
     };
 
     const user = await submitSocialOnboarding(body);
