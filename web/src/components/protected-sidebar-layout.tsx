@@ -135,16 +135,18 @@ export function ProtectedSidebarLayout({
     return () => mediaQuery.removeEventListener("change", listener);
   }, []);
 
-  const expanded = mode === "fixed" || (mode === "auto" && hoverExpanded);
-  const compact = mode === "compact" || (mode === "auto" && !hoverExpanded);
+  const expanded = !isMounted ? true : (mode === "fixed" || (mode === "auto" && hoverExpanded));
+  const compact = !isMounted ? false : (mode === "compact" || (mode === "auto" && !hoverExpanded));
   const hidden = false;
 
-  const isNightActive = automaticTheme && isSystemDark;
-  const isSidebarDark = automaticTheme ? isSystemDark : darkPanel;
+  const isNightActive = !isMounted ? false : (automaticTheme && isSystemDark);
+  const isSidebarDark = !isMounted ? true : (automaticTheme ? isSystemDark : darkPanel);
 
-  const bgImage = automaticTheme
-    ? (isSystemDark ? "/images/home-brackgorund_dark.png" : "/images/home-brackgorund_light.png")
-    : "/images/home-brackgorund_light.png";
+  const bgImage = !isMounted
+    ? "/images/home-brackgorund_light.png"
+    : (automaticTheme
+      ? (isSystemDark ? "/images/home-brackgorund_dark.png" : "/images/home-brackgorund_light.png")
+      : "/images/home-brackgorund_light.png");
 
   // Synchronize HTML tag class for zero-flash transitions
   useEffect(() => {

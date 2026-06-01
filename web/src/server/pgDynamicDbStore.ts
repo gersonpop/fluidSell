@@ -1063,16 +1063,60 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
   }
 
   if (table === "modules") {
+    let rawModules;
     if (id) {
       const one = await getPgPool().query("select * from public.\"Modules\" where id=$1", [id]);
-      return one.rows;
+      rawModules = one.rows;
+    } else {
+      const all = await getPgPool().query("select * from public.\"Modules\" order by sort_order asc, name asc");
+      rawModules = all.rows;
     }
-    const all = await getPgPool().query("select * from public.\"Modules\" order by sort_order asc, name asc");
-    staticStoreCache["modules"] = {
-      data: all.rows,
-      expiresAt: Date.now() + STATIC_CACHE_TTL_MS
-    };
-    return all.rows;
+
+    let actRole = "user";
+    if (actor.role === "SU") {
+      actRole = "su";
+    } else {
+      const userRoleScopeRes = await getPgPool().query<{ scope: string }>(
+        `select r.scope 
+         from public."UserRole" ur 
+         join public."Role" r on r.id = ur."roleId" 
+         where ur.platform_user_id = $1 
+         limit 1`,
+        [actor.actorId]
+      );
+      if (userRoleScopeRes.rows.length > 0) {
+        actRole = String(userRoleScopeRes.rows[0].scope || "user").trim().toLowerCase();
+      }
+    }
+
+    const multidataRes = await getPgPool().query<{ Initials_PK: string; value: string }>(
+      'select "Initials_PK", "value" from public."st_Multidata"'
+    );
+    const scopeMap = new Map<string, string>();
+    for (const mData of multidataRes.rows) {
+      scopeMap.set(String(mData.Initials_PK).toLowerCase(), String(mData.value).trim().toLowerCase());
+    }
+
+    const filtered = rawModules.filter((m) => {
+      const scopeId = String(m.scope_id || "").trim().toLowerCase();
+      const scopeVal = scopeMap.get(scopeId) || "";
+
+      if (actRole === "su") {
+        return true;
+      }
+      if (actRole === "admin" || actRole === "administrator" || actRole === "administrador") {
+        return scopeVal === "user" || scopeVal === "admin" || !scopeVal;
+      }
+      return scopeVal === "user" || !scopeVal;
+    });
+
+    if (!id) {
+      staticStoreCache["modules"] = {
+        data: filtered,
+        expiresAt: Date.now() + STATIC_CACHE_TTL_MS
+      };
+    }
+    return filtered;
   }
   if (table === "st_multidata") {
     if (id) {

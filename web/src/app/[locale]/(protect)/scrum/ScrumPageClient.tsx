@@ -286,7 +286,7 @@ export function ScrumPageClient() {
         <header className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">sell-Ai / SCRUM</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">FluidSell / SCRUM</p>
               <h1 className="mt-1 text-2xl font-bold">Project Board</h1>
               <p className="text-sm text-slate-600">Sprint activo - Scrum Master: Integration Scrum Orchestrator</p>
             </div>

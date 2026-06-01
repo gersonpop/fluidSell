@@ -46,7 +46,7 @@ export default async function HomePage({params}: HomePageProps) {
             </div>
 
             <div className="mt-4 space-y-2 lg:mt-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-100">ShopIA</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-100">FluidSell</p>
               <h1 className="text-2xl font-semibold leading-8 tracking-tight text-white lg:text-3xl lg:leading-10">{t("loginHeading")}</h1>
               <p className="text-sm leading-6 text-slate-100 lg:text-base">{t("loginDescription")}</p>
             </div>

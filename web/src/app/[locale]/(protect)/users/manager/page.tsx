@@ -36,6 +36,8 @@ export default async function DynamicNewPage({params}: PageProps) {
         currentUserImage={session.user.image ?? undefined}
         currentUserProvider={(session.user as any).provider ?? undefined}
         isSU={role === "SU"}
+        currentUserCompanyId={(session.user as {companyId?: string | null}).companyId ?? undefined}
+        currentUserRole={rawRole}
       />
     </NewPagePattern>
   );

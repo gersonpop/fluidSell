@@ -4,7 +4,7 @@ import {useCallback, useEffect, useMemo, useState} from "react";
 
 const DEFAULT_COLUMNS = ["name", "assigned_role", "phone_number", "status", "actions"];
 
-export function DataManager({ currentUserEmail, currentUserImage, currentUserProvider, isSU }: { currentUserEmail?: string; currentUserImage?: string; currentUserProvider?: string; isSU?: boolean }) {
+export function DataManager({ currentUserEmail, currentUserImage, currentUserProvider, isSU, currentUserCompanyId, currentUserRole }: { currentUserEmail?: string; currentUserImage?: string; currentUserProvider?: string; isSU?: boolean; currentUserCompanyId?: string; currentUserRole?: string }) {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -37,6 +37,7 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
   const [rolesList, setRolesList] = useState<any[]>([]);
   const [assignmentsList, setAssignmentsList] = useState<any[]>([]);
   const [countriesList, setCountriesList] = useState<any[]>([]);
+  const [companiesList, setCompaniesList] = useState<any[]>([]);
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
@@ -166,18 +167,20 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [usersRes, rolesRes, assignmentsRes, countriesRes] = await Promise.all([
+      const [usersRes, rolesRes, assignmentsRes, countriesRes, companiesRes] = await Promise.all([
         fetch("/api/v1/db/users", { headers }),
         fetch("/api/v1/db/roles", { headers }),
         fetch("/api/v1/db/role_assignments", { headers }),
-        fetch("/api/v1/db/st_country", { headers }).catch(() => null)
+        fetch("/api/v1/db/st_country", { headers }).catch(() => null),
+        isSU ? fetch("/api/v1/db/companies", { headers }).catch(() => null) : null
       ]);
 
-      const [usersBody, rolesBody, assignmentsBody, countriesBody] = await Promise.all([
+      const [usersBody, rolesBody, assignmentsBody, countriesBody, companiesBody] = await Promise.all([
         usersRes.json(),
         rolesRes.json(),
         assignmentsRes.json(),
-        countriesRes ? countriesRes.json().catch(() => null) : null
+        countriesRes ? countriesRes.json().catch(() => null) : null,
+        companiesRes ? companiesRes.json().catch(() => null) : null
       ]);
 
       if (!usersRes.ok) throw new Error(usersBody?.message || "No se pudo cargar la lista de usuarios");
@@ -185,6 +188,7 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
       const usersData = Array.isArray(usersBody?.data) ? usersBody.data : [];
       const rolesData = Array.isArray(rolesBody?.data) ? rolesBody.data : [];
       const assignmentsData = Array.isArray(assignmentsBody?.data) ? assignmentsBody.data : [];
+      const companiesData = companiesBody && Array.isArray(companiesBody?.data) ? companiesBody.data : [];
       
       let countriesData = countriesBody && Array.isArray(countriesBody?.data) ? countriesBody.data : [];
       if (countriesData.length === 0) {
@@ -203,13 +207,14 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
       setRolesList(rolesData);
       setAssignmentsList(assignmentsData);
       setCountriesList(countriesData);
+      setCompaniesList(companiesData);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Error al cargar datos", "error");
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [headers, showToast]);
+  }, [headers, showToast, isSU]);
 
   useEffect(() => {
     void load();
@@ -254,6 +259,7 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
   const openAddDrawer = () => {
     setActionMode("add");
     setSelectedRow(null);
+    const defaultCompany = isSU ? (companiesList[0]?.id || "900000000") : (currentUserCompanyId || "900000000");
     setForm({
       user_email: "",
       name: "",
@@ -263,7 +269,7 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
       gender: "male",
       status: "active",
       provider: "manual",
-      companyId: "900000000",
+      companyId: defaultCompany,
       country_code: "+57",
       country_iso: "CO",
       avatar: "",
@@ -285,6 +291,7 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
       initialAvatar = currentUserImage || "";
     }
 
+    const activeCompany = isSU ? String(row?.companyId || "900000000") : (currentUserCompanyId || "900000000");
     setForm({
       user_email: String(row?.user_email || ""),
       name: String(row?.name || ""),
@@ -294,7 +301,7 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
       gender: String(row?.gender || "male"),
       status: String(row?.status || "active"),
       provider: String(row?.provider || "manual"),
-      companyId: String(row?.companyId || "900000000"),
+      companyId: activeCompany,
       country_code: String(row?.country_code || "+57"),
       country_iso: String(row?.country_iso || "CO"),
       avatar: initialAvatar,
@@ -519,6 +526,20 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
     }
     return options;
   }, [currentUserProvider, form.provider, actionMode]);
+
+  const filteredRolesList = useMemo(() => {
+    const actRole = String(currentUserRole || "user").trim().toLowerCase();
+    return rolesList.filter((role) => {
+      const roleScope = String(role.scope || "user").trim().toLowerCase();
+      if (actRole === "su") {
+        return true;
+      }
+      if (actRole === "admin" || actRole === "administrator" || actRole === "administrador") {
+        return roleScope === "user" || roleScope === "admin";
+      }
+      return roleScope === "user";
+    });
+  }, [rolesList, currentUserRole]);
 
 
   return (
@@ -954,14 +975,28 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
                   </select>
                 </label>
                 <label className="block">
-                  <span className="text-xs font-semibold text-slate-500">Compañía ID</span>
-                  <input
+                  <span className="text-xs font-semibold text-slate-500">Compañía *</span>
+                  <select
                     value={form.companyId}
                     disabled={!isSU}
                     onChange={(event) => setFormField("companyId", event.target.value)}
-                    placeholder="ID Compañía"
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white disabled:opacity-50 transition"
-                  />
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 disabled:opacity-50 transition"
+                  >
+                    {isSU ? (
+                      <>
+                        <option value="">-- Seleccionar Empresa --</option>
+                        {companiesList.map((comp) => (
+                          <option key={comp.id} value={comp.id}>
+                            {comp.commercialName || comp.legalName || comp.id}
+                          </option>
+                        ))}
+                      </>
+                    ) : (
+                      <option value={form.companyId || currentUserCompanyId || "900000000"}>
+                        {form.companyId || currentUserCompanyId || "Empresa Activa"}
+                      </option>
+                    )}
+                  </select>
                 </label>
               </div>
 
@@ -1099,7 +1134,7 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
                     className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-blue-400 transition"
                   >
                     <option value="">Ninguno (Sin Rol)</option>
-                    {rolesList.map((role) => (
+                    {filteredRolesList.map((role) => (
                       <option key={role.id} value={role.id}>
                         {role.name} ({role.scope})
                       </option>

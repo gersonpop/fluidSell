@@ -72,6 +72,7 @@ function renderModuleIcon(icon?: string | null) {
 export function DynamicComponent() {
   const [dbModules, setDbModules] = useState<any[]>([]);
   const [roles, setRoles] = useState<RoleRecord[]>([]);
+  const [scopesList, setScopesList] = useState<any[]>([]);
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -395,15 +396,20 @@ export function DynamicComponent() {
 
     const fetchData = async () => {
       try {
-        // Fetch Módulos
-        const modRes = await fetch("/api/v1/db/modules", {headers});
-        const modBody = await modRes.json();
-        const fetchedModules = Array.isArray(modBody?.data) ? modBody.data : [];
+        // Fetch Módulos, Roles y Catálogo de Scopes en paralelo
+        const [modRes, roleRes, scopesRes] = await Promise.all([
+          fetch("/api/v1/db/modules", {headers}),
+          fetch("/api/v1/db/roles", {headers}),
+          fetch("/api/v1/db/st_multidata", {headers}).catch(() => null)
+        ]);
 
-        // Fetch Roles
-        const roleRes = await fetch("/api/v1/db/roles", {headers});
+        const modBody = await modRes.json();
         const roleBody = await roleRes.json();
+        const scopesBody = scopesRes ? await scopesRes.json().catch(() => null) : null;
+
+        const fetchedModules = Array.isArray(modBody?.data) ? modBody.data : [];
         const fetchedRoles = Array.isArray(roleBody?.data) ? roleBody.data : [];
+        const fetchedScopes = scopesBody && Array.isArray(scopesBody?.data) ? scopesBody.data : [];
 
         if (cancelled) return;
 
@@ -416,12 +422,14 @@ export function DynamicComponent() {
         const rolesList = fetchedRoles.length > 0 ? fetchedRoles : [];
         setRoles((prev) => {
           const isSame = JSON.stringify(prev) === JSON.stringify(rolesList);
-          if (isSame) return prev;
-          if (rolesList.length > 0 && !selectedRoleId) {
-            setSelectedRoleId(rolesList[0].id);
-          }
-          return rolesList;
+          return isSame ? prev : rolesList;
         });
+
+        if (rolesList.length > 0) {
+          setSelectedRoleId((prevId) => prevId || rolesList[0].id);
+        }
+
+        setScopesList(fetchedScopes);
 
         // Guardar en caché local
         if (typeof window !== "undefined") {
@@ -442,7 +450,7 @@ export function DynamicComponent() {
 
     void fetchData();
     return () => { cancelled = true; };
-  }, [headers, selectedRoleId]);
+  }, [headers]);
 
   // Click away listener for the column visibility menu
   useEffect(() => {
@@ -585,10 +593,31 @@ export function DynamicComponent() {
     }
   };
 
-  // Se listan exclusivamente los módulos existentes persistidos en la base de datos
+  // Cargar metadatos y permisos del Rol seleccionado
+  const selectedRole = useMemo(() => {
+    return roles.find((r) => r.id === selectedRoleId) || null;
+  }, [roles, selectedRoleId]);
+
+  // Se listan exclusivamente los módulos existentes de acuerdo al alcance del cargo seleccionado
   const activeModules = useMemo(() => {
+    const roleScope = String(selectedRole?.scope || "user").trim().toLowerCase();
+
     return dbModules
-      .filter((dbMod) => dbMod.status === "active")
+      .filter((dbMod) => {
+        if (dbMod.status !== "active") return false;
+
+        // Resolve scope value from catalog
+        const scopeObj = scopesList.find(s => s.Initials_PK?.toLowerCase() === dbMod.scope_id?.toLowerCase() || s.value?.toLowerCase() === dbMod.scope_id?.toLowerCase());
+        const modScopeVal = String(scopeObj?.value || dbMod.scope_id || "").trim().toLowerCase();
+
+        if (roleScope === "user") {
+          return modScopeVal === "user" || !modScopeVal;
+        }
+        if (roleScope === "admin" || roleScope === "administrator" || roleScope === "administrador") {
+          return modScopeVal === "user" || modScopeVal === "admin" || !modScopeVal;
+        }
+        return true; // SU can configure everything
+      })
       .map((dbMod) => {
         // Fallback robusto para destination si no está definido
         let dest = (dbMod.destination || "").trim();
@@ -611,7 +640,7 @@ export function DynamicComponent() {
           actions: dbMod.actions
         };
       });
-  }, [dbModules]);
+  }, [dbModules, selectedRole, scopesList]);
 
   // Módulos clasificados por secciones
   const sections = useMemo(() => {
@@ -661,10 +690,7 @@ export function DynamicComponent() {
     });
   }, [activeModules]);
 
-  // Cargar metadatos y permisos del Rol seleccionado
-  const selectedRole = useMemo(() => {
-    return roles.find((r) => r.id === selectedRoleId) || null;
-  }, [roles, selectedRoleId]);
+
 
   useEffect(() => {
     if (selectedRole) {

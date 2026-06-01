@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "shopIA Web",
-  description: "Plataforma web multilenguaje de shopIA",
+  title: "FluidSell Web",
+  description: "Plataforma web multilenguaje de FluidSell",
 };
 
 export default function RootLayout({
