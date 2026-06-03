@@ -13,7 +13,20 @@ type LayoutProps = {
 
 export default async function DynamicEmbeddedLayout({params, children}: LayoutProps) {
   const {locale} = await params;
-  const session = await getServerSession(authOptions);
+  let session = await getServerSession(authOptions);
+  if (process.env.NODE_ENV === "development" && !session) {
+    session = {
+      user: {
+        name: "Dev User",
+        email: "gerson.pop@fluidsell.com",
+        image: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=256&auto=format&fit=crop",
+        role: "SU",
+        companyId: "900000000",
+        provider: "google"
+      },
+      expires: "2026-06-30T00:00:00.000Z"
+    } as any;
+  }
   if (!session?.user) redirect("/" + locale);
 
   const rawRole = String((session.user as {role?: string}).role ?? "SU").trim().toLowerCase();

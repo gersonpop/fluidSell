@@ -1,6 +1,7 @@
 "use client";
 
 import {useEffect, useMemo, useState} from "react";
+import {signOut} from "next-auth/react";
 
 type Props = {
   locale: string;
@@ -8,17 +9,22 @@ type Props = {
   provider: "google" | "facebook" | "linkedin";
   defaultFullName: string;
   defaultAvatar?: string;
+  conflictingProvider?: "google" | "facebook" | "linkedin" | null;
 };
 
-export function OnboardingClient({locale, email, provider, defaultFullName, defaultAvatar}: Props) {
+export function OnboardingClient({locale, email, provider, defaultFullName, defaultAvatar, conflictingProvider}: Props) {
   const [companies, setCompanies] = useState<Array<{id: string; name: string}>>([]);
   const [genders, setGenders] = useState<Array<{value: string; label: string}>>([]);
   const [countries, setCountries] = useState<Array<{code: string; label: string; prefixArea?: string}>>([]);
   const [departments, setDepartments] = useState<Array<{code: string; label: string}>>([]);
   const [cities, setCities] = useState<Array<{code: string; label: string}>>([]);
+  const [roles, setRoles] = useState<Array<{id: string; name: string}>>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [showConflictModal, setShowConflictModal] = useState(!!conflictingProvider);
+  const [showDniConflictModal, setShowDniConflictModal] = useState(false);
+  const [dniConflictProvider, setDniConflictProvider] = useState<string | null>(null);
 
   const defaultNameParts = defaultFullName.trim().split(/\s+/).filter(Boolean);
   const defaultFirstName = defaultNameParts.slice(0, 1).join(" ");
@@ -29,6 +35,7 @@ export function OnboardingClient({locale, email, provider, defaultFullName, defa
     lastName: defaultLastName,
     phone: "",
     companyId: "",
+    roleId: "",
     countryCode: "",
     country: "",
     department: "",
@@ -153,6 +160,24 @@ export function OnboardingClient({locale, email, provider, defaultFullName, defa
     void loadCities();
   }, [form.country, form.department]);
 
+  useEffect(() => {
+    if (!form.companyId) {
+      setRoles([]);
+      setForm((p) => ({ ...p, roleId: "" }));
+      return;
+    }
+    async function loadRoles() {
+      try {
+        const response = await fetch(`/api/v1/auth/social/onboarding/roles?companyId=${encodeURIComponent(form.companyId)}`);
+        const data = await response.json();
+        setRoles(data.items ?? []);
+      } catch (err) {
+        console.error("Error loading roles", err);
+      }
+    }
+    void loadRoles();
+  }, [form.companyId]);
+
   const valid = useMemo(
     () =>
       [
@@ -160,6 +185,7 @@ export function OnboardingClient({locale, email, provider, defaultFullName, defa
         form.lastName,
         form.phone,
         form.companyId,
+        form.roleId,
         form.countryCode,
         form.country,
         form.department,
@@ -210,25 +236,65 @@ export function OnboardingClient({locale, email, provider, defaultFullName, defa
   async function submit() {
     setSaving(true);
     setError(null);
-    const response = await fetch("/api/v1/auth/social/onboarding/submit", {
-      method: "POST",
-      headers: {"content-type": "application/json"},
-      body: JSON.stringify({
-        email,
-        provider,
-        ...form,
-        phone: `${form.countryCode}${form.phone}`
-      })
-    });
-    const data = await response.json();
-    setSaving(false);
+    try {
+      const response = await fetch("/api/v1/auth/social/onboarding/submit", {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify({
+          email,
+          provider,
+          ...form,
+          phone: form.phone,
+          metadata: {
+            roleId: form.roleId
+          }
+        })
+      });
+      const data = await response.json();
+      setSaving(false);
 
-    if (!response.ok) {
-      setError(data.message ?? "No fue posible guardar");
-      return;
+      if (!response.ok) {
+        if (data.message && data.message.startsWith("DNI_CONFLICT:")) {
+          const parts = data.message.split(":");
+          const confProvider = parts[1] || "google";
+          setDniConflictProvider(confProvider);
+          setShowDniConflictModal(true);
+          return;
+        }
+        setError(data.message ?? "No fue posible guardar");
+        return;
+      }
+
+      window.location.href = `/${locale}/pending-approval`;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al guardar");
+      setSaving(false);
     }
+  }
 
-    window.location.href = `/${locale}/pending-approval`;
+  async function handleCancel() {
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/v1/auth/social/onboarding/cancel", {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify({
+          email,
+          provider,
+          ...form,
+          phone: form.phone
+        })
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.message ?? "No fue posible cancelar el registro");
+      }
+      await signOut({callbackUrl: `/${locale}`});
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cancelar el registro");
+      setSaving(false);
+    }
   }
 
   return (
@@ -317,6 +383,17 @@ export function OnboardingClient({locale, email, provider, defaultFullName, defa
               >
                 <option value="" className="bg-slate-900 text-white">Empresa</option>
                 {companies.map((item) => (
+                  <option key={item.id} value={item.id} className="bg-slate-900 text-white">{item.name}</option>
+                ))}
+              </select>
+              <select
+                value={form.roleId}
+                onChange={(e) => setForm((p) => ({...p, roleId: e.target.value}))}
+                disabled={!form.companyId}
+                className="w-full rounded-xl border border-white/10 bg-white/10 hover:border-white/20 focus:border-purple-400 focus:bg-white/15 px-4 py-2.5 text-sm text-white outline-none transition-all focus:ring-4 focus:ring-purple-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <option value="" className="bg-slate-900 text-white">Cargo / Puesto</option>
+                {roles.map((item) => (
                   <option key={item.id} value={item.id} className="bg-slate-900 text-white">{item.name}</option>
                 ))}
               </select>
@@ -422,15 +499,113 @@ export function OnboardingClient({locale, email, provider, defaultFullName, defa
 
           {error ? <p className="mt-3 text-sm text-rose-400 font-medium">{error}</p> : null}
 
-          <button
-            disabled={!valid || saving}
-            onClick={() => void submit()}
-            className="mt-6 w-full rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 active:from-cyan-500 active:to-blue-600 px-5 py-3 font-semibold text-slate-950 shadow-lg shadow-cyan-500/10 transition-all duration-200 disabled:cursor-not-allowed disabled:from-slate-700 disabled:to-slate-800 disabled:text-slate-400 disabled:shadow-none"
-          >
-            {saving ? "Guardando..." : "Guardar y enviar a revisión"}
-          </button>
+          <div className="mt-6 flex flex-col sm:flex-row items-center gap-4">
+            <button
+              disabled={!valid || saving}
+              onClick={() => void submit()}
+              className="w-full sm:w-2/3 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 active:from-cyan-500 active:to-blue-600 px-5 py-3 font-semibold text-slate-950 shadow-lg shadow-cyan-500/10 transition-all duration-200 disabled:cursor-not-allowed disabled:from-slate-700 disabled:to-slate-800 disabled:text-slate-400 disabled:shadow-none"
+            >
+              {saving ? "Guardando..." : "Guardar y enviar a revisión"}
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void handleCancel()}
+              className="w-full sm:w-1/3 rounded-xl border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-500/30 px-5 py-3 font-semibold text-rose-200 transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? "Cancelando..." : "Cancelar"}
+            </button>
+          </div>
         </section>
       </main>
+
+      {showConflictModal && conflictingProvider && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div className="relative w-full max-w-md liquid-card rounded-[2rem] p-6 sm:p-8 text-white">
+            <span className="pointer-events-none absolute inset-[1px] rounded-[1.95rem] border-2 border-white/20" />
+            <span className="pointer-events-none absolute inset-[1px] rounded-[1.95rem] shadow-[inset_0_1px_0_rgba(255,255,255,0.45),inset_0_-12px_28px_rgba(255,255,255,0.05),0_18px_40px_rgba(2,23,56,0.2)]" />
+            
+            <div className="flex flex-col items-center text-center">
+              <div className="h-12 w-12 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6 text-amber-400 animate-pulse">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                </svg>
+              </div>
+
+              <h2 className="text-xl font-bold mb-2">Registro existente</h2>
+              
+              <p className="text-sm text-slate-300 mb-6 leading-relaxed">
+                Tu correo electrónico ya se encuentra registrado en FluidSell utilizando la red social{" "}
+                <span className="font-semibold text-sky-300">
+                  {conflictingProvider === "google"
+                    ? "Google"
+                    : conflictingProvider === "facebook"
+                    ? "Facebook"
+                    : "LinkedIn"}
+                </span>
+                .
+              </p>
+
+              <div className="w-full">
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => {
+                    void handleCancel();
+                  }}
+                  className="w-full rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 active:from-cyan-500 active:to-blue-600 px-5 py-3 font-semibold text-slate-950 shadow-lg shadow-cyan-500/10 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {saving ? "Procesando..." : "Ir a iniciar sesión"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDniConflictModal && dniConflictProvider && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div className="relative w-full max-w-md liquid-card rounded-[2rem] p-6 sm:p-8 text-white">
+            <span className="pointer-events-none absolute inset-[1px] rounded-[1.95rem] border-2 border-white/20" />
+            <span className="pointer-events-none absolute inset-[1px] rounded-[1.95rem] shadow-[inset_0_1px_0_rgba(255,255,255,0.45),inset_0_-12px_28px_rgba(255,255,255,0.05),0_18px_40px_rgba(2,23,56,0.2)]" />
+            
+            <div className="flex flex-col items-center text-center">
+              <div className="h-12 w-12 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6 text-amber-400 animate-pulse">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                </svg>
+              </div>
+
+              <h2 className="text-xl font-bold mb-2">DNI ya registrado</h2>
+              
+              <p className="text-sm text-slate-300 mb-6 leading-relaxed">
+                Este DNI ya se encuentra registrado con la red social{" "}
+                <span className="font-semibold text-sky-300">
+                  {dniConflictProvider === "google"
+                    ? "Google"
+                    : dniConflictProvider === "facebook"
+                    ? "Facebook"
+                    : "LinkedIn"}
+                </span>
+                . Cancela este registro e ingresa con esa red social.
+              </p>
+
+              <div className="w-full">
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => {
+                    void handleCancel();
+                  }}
+                  className="w-full rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 active:from-cyan-500 active:to-blue-600 px-5 py-3 font-semibold text-slate-950 shadow-lg shadow-cyan-500/10 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {saving ? "Procesando..." : "Ir a iniciar sesión"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

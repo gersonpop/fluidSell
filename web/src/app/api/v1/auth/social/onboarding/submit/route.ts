@@ -20,11 +20,27 @@ export async function POST(request: Request) {
       avatar?: string;
     };
 
-    const user = await submitSocialOnboarding(body);
+    const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "127.0.0.1";
+    const userAgent = request.headers.get("user-agent") || "unknown";
+    const geoCountry = request.headers.get("x-vercel-ip-country") || "";
+    const geoRegion = request.headers.get("x-vercel-ip-country-region") || "";
+    const geoCity = request.headers.get("x-vercel-ip-city") || "";
+
+    const metadata = {
+      ip,
+      userAgent,
+      geo: {
+        country: geoCountry,
+        region: geoRegion,
+        city: geoCity
+      }
+    };
+
+    const user = await submitSocialOnboarding({ ...body, metadata });
     return NextResponse.json({ok: true, user});
   } catch (error) {
     const message = error instanceof Error ? error.message : "Request failed";
-    const status = message.includes("already") || message.includes("Invalid") ? 409 : 400;
+    const status = message.includes("already") || message.includes("Invalid") || message.includes("DNI_CONFLICT") ? 409 : 400;
     return NextResponse.json({message}, {status});
   }
 }

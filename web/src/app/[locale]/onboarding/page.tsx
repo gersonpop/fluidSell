@@ -26,6 +26,8 @@ export default async function OnboardingPage({params}: OnboardingPageProps) {
     redirect(`/${locale}/pending-approval`);
   }
 
+  const conflictingProvider = resolved.flow === "PROVIDER_CONFLICT" ? (resolved.user?.provider ?? null) : null;
+
   return (
     <OnboardingClient
       locale={locale}
@@ -33,6 +35,7 @@ export default async function OnboardingPage({params}: OnboardingPageProps) {
       provider={provider}
       defaultFullName={session.user.name ?? ""}
       defaultAvatar={typeof session.user.image === "string" ? session.user.image : ""}
+      conflictingProvider={conflictingProvider}
     />
   );
 }

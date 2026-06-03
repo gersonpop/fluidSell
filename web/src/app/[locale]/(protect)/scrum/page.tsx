@@ -25,7 +25,7 @@ export default async function ScrumPage({params}: ScrumPageProps) {
       redirect(`/${locale}/pending-approval`);
     }
     if (navigation.flow === "PROVIDER_CONFLICT") {
-      redirect(`/${locale}`);
+      redirect(`/${locale}/onboarding`);
     }
 
   }

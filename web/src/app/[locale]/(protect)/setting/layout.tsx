@@ -38,8 +38,6 @@ export async function requireProtectedSettingContext(locale: string) {
   const provider = ((session.user as {provider?: "google" | "facebook" | "linkedin"}).provider ?? "google");
   const navigation = await resolveLoginNavigation(session.user.email, provider);
   if (navigation.flow === "FORM_REQUIRED") redirect(`/${locale}/onboarding`);
-  if (navigation.flow === "PENDING_ONLY") redirect(`/${locale}/pending-approval`);
-  if (navigation.flow === "PROVIDER_CONFLICT") redirect(`/${locale}`);
 
   const rawRole = String((session.user as {role?: string}).role ?? "SU").trim().toLowerCase();
   const role: "SU" | "cliente" = rawRole === "su" ? "SU" : "cliente";
@@ -49,22 +47,19 @@ export async function requireProtectedSettingContext(locale: string) {
     companyId: (session.user as {companyId?: string | null}).companyId ?? null
   };
 
-  const rows = (await listRecords(actor, "modules", null)) as Array<Record<string, unknown>>;
-  const modules: SettingModule[] = rows
-    .map((row) => ({
-      id: toText(row.id),
-      code: toText(row.code),
-      name: toText(row.name),
-      description: toText(row.description),
-      route: toText(row.route),
-      icon: toText(row.icon) || null,
-      parent: toText(row.parent),
-      status: toText(row.status).toLowerCase(),
-      pageContent: toText(row.page_content || row.content) || null,
-      sortOrder: toSort(row.sort_order ?? row.order)
-    }))
-    .filter((item) => item.status === "active")
-    .sort((a, b) => (a.sortOrder !== b.sortOrder ? a.sortOrder - b.sortOrder : a.name.localeCompare(b.name)));
+  const rows = (await listRecords(actor, "modules", null)) as Array<Record<string, any>>;
+  const modules: SettingModule[] = rows.map((row) => ({
+    id: String(row.id),
+    code: String(row.code),
+    name: String(row.name),
+    description: String(row.description ?? ""),
+    route: String(row.route),
+    icon: String(row.icon || "") || null,
+    parent: String(row.parent),
+    status: String(row.status),
+    pageContent: String(row.page_content || row.pageContent || row.content || ""),
+    sortOrder: Number(row.sort_order ?? row.sortOrder ?? 100)
+  })).sort((a, b) => a.sortOrder - b.sortOrder);
 
   const initialSidebarModules = selectSidebarModulesFromDbRows(rows);
 

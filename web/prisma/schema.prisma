@@ -25,6 +25,7 @@ enum UserStatus {
 
 enum RoleScope {
   SU
+  Multicompany
   Admin
   User
 }
@@ -113,6 +114,32 @@ model PlatformUser {
   @@map("PlatformUser")
 }
 
+model Onboarding {
+  id             String    @id @default(cuid())
+  email          String    @unique @map("email")
+  name           String?   @map("name")
+  lastName       String?   @map("last_name")
+  phoneNumber    String?   @map("phone_number")
+  companyId      String?   @map("companyId")
+  company        Company?  @relation(fields: [companyId], references: [id])
+  countryCode    String?   @map("country_code")
+  countryIso     String?   @map("country_iso")
+  departmentCode String?   @map("department_code")
+  cityCode       String?   @map("city_code")
+  dni            String?   @map("dni")
+  birthDate      DateTime? @map("birth_date")
+  gender         String?   @map("gender")
+  provider       String?   @map("provider")
+  avatar         String?   @map("avatar")
+  status         String    @default("pending_approval") @map("status")
+  metadata       Json?     @map("metadata")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@unique([dni, countryCode])
+  @@map("Onboarding")
+}
+
 model Company {
   id             String        @id @default(cuid())
   legalName      String?
@@ -135,7 +162,9 @@ model Company {
   brandProfile   BrandProfile?
 
   users           PlatformUser[] @relation("CompanyMembers")
+  onboardings     Onboarding[]
   roles           Role[]
+  userRoles       UserRole[]
   products        Product[]
   customers       Customer[]
   sales           Sale[]
@@ -203,14 +232,16 @@ model UserRole {
   id             String       @id @default(cuid())
   platformUserId String       @map("platform_user_id")
   roleId         String
+  companyId      String?      @map("company_id")
   hashPermission String?      @map("hash_permission")
 
   user           PlatformUser @relation(fields: [platformUserId], references: [idUserPk])
   role           Role         @relation(fields: [roleId], references: [id])
+  company        Company?     @relation(fields: [companyId], references: [id])
 
   createdAt      DateTime     @default(now())
 
-  @@unique([platformUserId, roleId])
+  @@unique([platformUserId, roleId, companyId])
   @@index([roleId])
 }
 

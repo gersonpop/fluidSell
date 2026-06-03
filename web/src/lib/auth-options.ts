@@ -35,7 +35,22 @@ if (process.env.AUTH_LINKEDIN_ID && process.env.AUTH_LINKEDIN_SECRET) {
   providers.push(
     LinkedInProvider({
       clientId: process.env.AUTH_LINKEDIN_ID,
-      clientSecret: process.env.AUTH_LINKEDIN_SECRET
+      clientSecret: process.env.AUTH_LINKEDIN_SECRET,
+      authorization: {
+        params: { scope: "openid profile email" },
+      },
+      wellKnown: "https://www.linkedin.com/oauth/.well-known/openid-configuration",
+      userinfo: {
+        url: "https://api.linkedin.com/v2/userinfo",
+      },
+      profile(profile) {
+        return {
+          id: profile.sub,
+          name: profile.name,
+          email: profile.email,
+          image: profile.picture
+        };
+      }
     })
   );
 }
@@ -45,7 +60,14 @@ export const authOptions: NextAuthOptions = {
   secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
   callbacks: {
     async jwt({token, profile, user, account}) {
-      const profilePicture = (profile as {picture?: string} | undefined)?.picture;
+      let profilePicture: string | undefined = undefined;
+      if (profile) {
+        if (typeof (profile as any).picture === "string") {
+          profilePicture = (profile as any).picture;
+        } else if (typeof (profile as any).picture?.data?.url === "string") {
+          profilePicture = (profile as any).picture.data.url;
+        }
+      }
       const userImage = (user as {image?: string | null} | undefined)?.image ?? undefined;
       const tokenPicture = typeof token.picture === "string" ? token.picture : undefined;
       const tokenImage = typeof token.image === "string" ? token.image : undefined;

@@ -1,6 +1,6 @@
 import {Pool} from "pg";
 
-export type OnboardingStatus = "active" | "inactive" | "pending_approval";
+export type OnboardingStatus = "active" | "inactive" | "pending_approval" | "failed";
 export type ResolveFlow = "ACTIVE" | "FORM_REQUIRED" | "PENDING_ONLY" | "PROVIDER_CONFLICT";
 
 type SocialProvider = "google" | "facebook" | "linkedin";
@@ -42,6 +42,25 @@ export type OnboardingSubmitInput = {
   gender: string;
   provider: SocialProvider;
   avatar?: string;
+  metadata?: any;
+};
+
+export type OnboardingCancelInput = {
+  email: string;
+  provider: SocialProvider;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  companyId?: string;
+  countryCode?: string;
+  country?: string;
+  department?: string;
+  city?: string;
+  dni?: string;
+  birthDate?: string;
+  gender?: string;
+  avatar?: string;
+  metadata?: any;
 };
 
 type CatalogDb = {
@@ -79,7 +98,8 @@ const defaultCatalogDb: CatalogDb = {
 const REQUIRED_USER_STATUS_VALUES = [
   {value: "active", label: "Activo"},
   {value: "inactive", label: "Inactivo"},
-  {value: "pending_approval", label: "Pendiente de aprobacion"}
+  {value: "pending_approval", label: "Pendiente de aprobacion"},
+  {value: "failed", label: "Fallido"}
 ];
 
 let pool: Pool | null = null;
@@ -114,6 +134,7 @@ function normalizeStatus(status: string | null | undefined): OnboardingStatus {
   const raw = String(status ?? "").trim().toLowerCase();
   if (raw === "active") return "active";
   if (raw === "pending_approval") return "pending_approval";
+  if (raw === "failed") return "failed";
   return "inactive";
 }
 
@@ -287,22 +308,61 @@ export async function getCatalogMultidata(group: string) {
 
 export async function resolveSocialOnboarding(email: string, provider: SocialProvider): Promise<{flow: ResolveFlow; user: UserRecord | null}> {
   await ensureUserStatusCatalog();
-  const row = await getPool().query('SELECT * FROM "PlatformUser" WHERE lower("user_email")=lower($1) LIMIT 1', [email]);
-  if ((row.rowCount ?? 0) === 0) {
-    return {flow: "FORM_REQUIRED", user: null};
+  
+  // 1. Check PlatformUser first
+  const userRow = await getPool().query('SELECT * FROM "PlatformUser" WHERE lower("user_email")=lower($1) LIMIT 1', [email]);
+  if ((userRow.rowCount ?? 0) > 0) {
+    const user = mapRowToUser(userRow.rows[0]);
+    if (user.provider !== provider) {
+      return {flow: "PROVIDER_CONFLICT", user};
+    }
+    if (user.status === "pending_approval") {
+      return {flow: "PENDING_ONLY", user};
+    }
+    if (user.status === "inactive") {
+      return {flow: "FORM_REQUIRED", user};
+    }
+    return {flow: "ACTIVE", user};
   }
 
-  const user = mapRowToUser(row.rows[0]);
-  if (user.provider !== provider) {
-    return {flow: "PROVIDER_CONFLICT", user};
+  // 2. Check Onboarding table
+  const onboardingRow = await getPool().query('SELECT * FROM "Onboarding" WHERE lower("email")=lower($1) LIMIT 1', [email]);
+  if ((onboardingRow.rowCount ?? 0) > 0) {
+    const ob = onboardingRow.rows[0];
+    const obProvider = ob.provider as SocialProvider;
+    
+    const obUser: UserRecord = {
+      id: String(ob.id),
+      email: String(ob.email),
+      firstName: String(ob.name ?? ""),
+      lastName: String(ob.last_name ?? ""),
+      fullName: `${String(ob.name ?? "")} ${String(ob.last_name ?? "")}`.trim(),
+      phone: String(ob.phone_number ?? ""),
+      companyId: String(ob.companyId ?? ""),
+      countryCode: String(ob.country_code ?? ""),
+      country: String(ob.country_iso ?? ""),
+      department: String(ob.department_code ?? ""),
+      city: String(ob.city_code ?? ""),
+      dni: String(ob.dni ?? ""),
+      birthDate: ob.birth_date ? new Date(ob.birth_date).toISOString() : "",
+      gender: String(ob.gender ?? ""),
+      status: normalizeStatus(String(ob.status)),
+      provider: obProvider,
+      avatar: ob.avatar ? String(ob.avatar) : undefined,
+      createdAt: new Date(ob.created_at).toISOString(),
+      updatedAt: new Date(ob.updated_at).toISOString()
+    };
+
+    if (obProvider !== provider) {
+      return {flow: "PROVIDER_CONFLICT", user: obUser};
+    }
+    if (obUser.status === "pending_approval") {
+      return {flow: "PENDING_ONLY", user: obUser};
+    }
+    return {flow: "FORM_REQUIRED", user: obUser};
   }
-  if (user.status === "pending_approval") {
-    return {flow: "PENDING_ONLY", user};
-  }
-  if (user.status === "inactive") {
-    return {flow: "FORM_REQUIRED", user};
-  }
-  return {flow: "ACTIVE", user};
+
+  return {flow: "FORM_REQUIRED", user: null};
 }
 
 export async function submitSocialOnboarding(input: OnboardingSubmitInput) {
@@ -340,16 +400,31 @@ export async function submitSocialOnboarding(input: OnboardingSubmitInput) {
   assertCatalogValue((catalogs.citiesByDepartment[input.department] ?? []).some((item) => item.code === input.city), "Invalid city");
   assertCatalogValue((catalogs.multidataByGroup.gender ?? []).some((item) => item.value === input.gender), "Invalid gender");
 
-  const duplicate = await getPool().query(
-    'SELECT "id_user_pk" FROM "PlatformUser" WHERE "country_code"=$1 AND "dni"=$2 AND lower("user_email")<>lower($3) LIMIT 1',
+  const duplicateUser = await getPool().query(
+    'SELECT "provider" FROM "PlatformUser" WHERE "country_code"=$1 AND "dni"=$2 AND lower("user_email")<>lower($3) LIMIT 1',
     [input.countryCode, normalizedDni, normalizedEmail]
   );
-  if ((duplicate.rowCount ?? 0) > 0) {
-    throw new Error("DNI already exists for this country code");
+  const duplicateOnboarding = await getPool().query(
+    'SELECT "provider" FROM "Onboarding" WHERE "country_code"=$1 AND "dni"=$2 AND lower("email")<>lower($3) LIMIT 1',
+    [input.countryCode, normalizedDni, normalizedEmail]
+  );
+  if ((duplicateUser.rowCount ?? 0) > 0) {
+    const existingProvider = duplicateUser.rows[0].provider || "google";
+    throw new Error(`DNI_CONFLICT:${existingProvider}`);
+  }
+  if ((duplicateOnboarding.rowCount ?? 0) > 0) {
+    const existingProvider = duplicateOnboarding.rows[0].provider || "google";
+    throw new Error(`DNI_CONFLICT:${existingProvider}`);
   }
 
-  const existingResult = await getPool().query('SELECT * FROM "PlatformUser" WHERE lower("user_email")=lower($1) LIMIT 1', [normalizedEmail]);
-  const id = (existingResult.rowCount ?? 0) > 0 ? String(existingResult.rows[0].id_user_pk) : nextId("USR");
+  // Verify that the user is not already fully active in PlatformUser
+  const existingUserResult = await getPool().query('SELECT * FROM "PlatformUser" WHERE lower("user_email")=lower($1) LIMIT 1', [normalizedEmail]);
+  if ((existingUserResult.rowCount ?? 0) > 0) {
+    throw new Error("User is already fully registered on the platform");
+  }
+
+  const existingResult = await getPool().query('SELECT * FROM "Onboarding" WHERE lower("email")=lower($1) LIMIT 1', [normalizedEmail]);
+  const id = (existingResult.rowCount ?? 0) > 0 ? String(existingResult.rows[0].id) : nextId("ONB");
   const previousStatus = (existingResult.rowCount ?? 0) > 0 ? normalizeStatus(String(existingResult.rows[0].status)) : null;
   const previousProvider = (existingResult.rowCount ?? 0) > 0 ? String(existingResult.rows[0].provider) : null;
 
@@ -357,8 +432,214 @@ export async function submitSocialOnboarding(input: OnboardingSubmitInput) {
     throw new Error(`User already linked with provider ${previousProvider}`);
   }
 
+  const birthDateValue = input.birthDate ? input.birthDate : null;
+  const metadataJson = input.metadata ? JSON.stringify(input.metadata) : null;
+
   await getPool().query(
     `
+      INSERT INTO "Onboarding" (
+        "id","email","name","last_name","phone_number","companyId","country_code","country_iso","department_code","city_code","dni","birth_date","gender","status","provider","avatar","metadata","created_at","updated_at"
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW(),NOW()
+      )
+      ON CONFLICT ("email")
+      DO UPDATE SET
+        "name"=EXCLUDED."name",
+        "last_name"=EXCLUDED."last_name",
+        "phone_number"=EXCLUDED."phone_number",
+        "companyId"=EXCLUDED."companyId",
+        "country_code"=EXCLUDED."country_code",
+        "country_iso"=EXCLUDED."country_iso",
+        "department_code"=EXCLUDED."department_code",
+        "city_code"=EXCLUDED."city_code",
+        "dni"=EXCLUDED."dni",
+        "birth_date"=EXCLUDED."birth_date",
+        "gender"=EXCLUDED."gender",
+        "status"=EXCLUDED."status",
+        "provider"=EXCLUDED."provider",
+        "avatar"=EXCLUDED."avatar",
+        "metadata"=EXCLUDED."metadata",
+        "updated_at"=NOW()
+    `,
+    [
+      id,
+      normalizedEmail,
+      input.firstName,
+      input.lastName,
+      input.phone,
+      input.companyId,
+      input.countryCode,
+      input.country,
+      input.department,
+      input.city,
+      normalizedDni,
+      birthDateValue,
+      input.gender,
+      "pending_approval",
+      input.provider,
+      input.avatar ?? null,
+      metadataJson
+    ]
+  );
+
+  await getPool().query(
+    `INSERT INTO "AuditLog" (id,"actorType","actorId",action,entity,"entityId",metadata,"createdAt")
+     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,NOW())`,
+    [
+      nextId("ONAUDIT"),
+      "system",
+      normalizedEmail,
+      (existingResult.rowCount ?? 0) > 0 ? "update-onboarding" : "create-onboarding",
+      "Onboarding",
+      id,
+      JSON.stringify({provider: input.provider, fromStatus: previousStatus, toStatus: "pending_approval"})
+    ]
+  );
+
+  const saved = await getPool().query('SELECT * FROM "Onboarding" WHERE "id"=$1', [id]);
+  const row = saved.rows[0];
+  return {
+    id: String(row.id),
+    email: String(row.email),
+    firstName: String(row.name ?? ""),
+    lastName: String(row.last_name ?? ""),
+    fullName: `${String(row.name ?? "")} ${String(row.last_name ?? "")}`.trim(),
+    phone: String(row.phone_number ?? ""),
+    companyId: String(row.companyId ?? ""),
+    countryCode: String(row.country_code),
+    country: String(row.country_iso ?? ""),
+    department: String(row.department_code ?? ""),
+    city: String(row.city_code ?? ""),
+    dni: String(row.dni),
+    birthDate: String(row.birth_date),
+    gender: String(row.gender),
+    status: normalizeStatus(String(row.status)),
+    provider: String(row.provider ?? "google") as SocialProvider,
+    avatar: row.avatar ? String(row.avatar) : undefined,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+export async function cancelSocialOnboarding(input: OnboardingCancelInput) {
+  await ensureUserStatusCatalog();
+  const normalizedEmail = input.email.trim().toLowerCase();
+  const normalizedDni = input.dni?.trim() || null;
+
+  const existingResult = await getPool().query('SELECT * FROM "Onboarding" WHERE lower("email")=lower($1) LIMIT 1', [normalizedEmail]);
+  const id = (existingResult.rowCount ?? 0) > 0 ? String(existingResult.rows[0].id) : nextId("ONB");
+  const previousStatus = (existingResult.rowCount ?? 0) > 0 ? normalizeStatus(String(existingResult.rows[0].status)) : null;
+
+  const birthDateValue = input.birthDate ? input.birthDate : null;
+  const metadataJson = input.metadata ? JSON.stringify(input.metadata) : null;
+
+  await getPool().query(
+    `
+      INSERT INTO "Onboarding" (
+        "id","email","name","last_name","phone_number","companyId","country_code","country_iso","department_code","city_code","dni","birth_date","gender","status","provider","avatar","metadata","created_at","updated_at"
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW(),NOW()
+      )
+      ON CONFLICT ("email")
+      DO UPDATE SET
+        "name"=COALESCE(EXCLUDED."name", "Onboarding"."name"),
+        "last_name"=COALESCE(EXCLUDED."last_name", "Onboarding"."last_name"),
+        "phone_number"=COALESCE(EXCLUDED."phone_number", "Onboarding"."phone_number"),
+        "companyId"=COALESCE(EXCLUDED."companyId", "Onboarding"."companyId"),
+        "country_code"=COALESCE(EXCLUDED."country_code", "Onboarding"."country_code"),
+        "country_iso"=COALESCE(EXCLUDED."country_iso", "Onboarding"."country_iso"),
+        "department_code"=COALESCE(EXCLUDED."department_code", "Onboarding"."department_code"),
+        "city_code"=COALESCE(EXCLUDED."city_code", "Onboarding"."city_code"),
+        "dni"=COALESCE(EXCLUDED."dni", "Onboarding"."dni"),
+        "birth_date"=COALESCE(EXCLUDED."birth_date", "Onboarding"."birth_date"),
+        "gender"=COALESCE(EXCLUDED."gender", "Onboarding"."gender"),
+        "status"=EXCLUDED."status",
+        "provider"=EXCLUDED."provider",
+        "avatar"=COALESCE(EXCLUDED."avatar", "Onboarding"."avatar"),
+        "metadata"=EXCLUDED."metadata",
+        "updated_at"=NOW()
+    `,
+    [
+      id,
+      normalizedEmail,
+      input.firstName || null,
+      input.lastName || null,
+      input.phone || null,
+      input.companyId || null,
+      input.countryCode || null,
+      input.country || null,
+      input.department || null,
+      input.city || null,
+      normalizedDni,
+      birthDateValue,
+      input.gender || null,
+      "failed",
+      input.provider,
+      input.avatar || null,
+      metadataJson
+    ]
+  );
+
+  await getPool().query(
+    `INSERT INTO "AuditLog" (id,"actorType","actorId",action,entity,"entityId",metadata,"createdAt")
+     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,NOW())`,
+    [
+      nextId("ONAUDIT"),
+      "system",
+      normalizedEmail,
+      "cancel-onboarding",
+      "Onboarding",
+      id,
+      JSON.stringify({provider: input.provider, fromStatus: previousStatus, toStatus: "failed"})
+    ]
+  );
+}
+
+export async function listPendingApprovals() {
+  await ensureUserStatusCatalog();
+  const rows = await getPool().query('SELECT * FROM "Onboarding" WHERE "status"=$1 ORDER BY "created_at" DESC', ["pending_approval"]);
+  return rows.rows.map((row) => ({
+    id: String(row.id),
+    email: String(row.email),
+    firstName: String(row.name ?? ""),
+    lastName: String(row.last_name ?? ""),
+    fullName: `${String(row.name ?? "")} ${String(row.last_name ?? "")}`.trim(),
+    phone: String(row.phone_number ?? ""),
+    companyId: String(row.companyId ?? ""),
+    countryCode: String(row.country_code),
+    country: String(row.country_iso ?? ""),
+    department: String(row.department_code ?? ""),
+    city: String(row.city_code ?? ""),
+    dni: String(row.dni),
+    birthDate: String(row.birth_date),
+    gender: String(row.gender),
+    status: normalizeStatus(String(row.status)),
+    provider: String(row.provider ?? "google") as SocialProvider,
+    avatar: row.avatar ? String(row.avatar) : undefined,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  }));
+}
+
+export async function updateApprovalStatus(userId: string, actor: string, action: "approve" | "reject") {
+  await ensureUserStatusCatalog();
+  
+  const current = await getPool().query('SELECT * FROM "Onboarding" WHERE "id"=$1 LIMIT 1', [userId]);
+  if ((current.rowCount ?? 0) === 0) {
+    throw new Error("Onboarding record not found");
+  }
+  const ob = current.rows[0];
+
+  const nextStatus = action === "approve" ? "active" : "inactive";
+
+  await getPool().query('UPDATE "Onboarding" SET "status"=$1, "updated_at"=NOW() WHERE "id"=$2', [nextStatus, userId]);
+
+  if (action === "approve") {
+    const existingUser = await getPool().query('SELECT * FROM "PlatformUser" WHERE lower("user_email")=lower($1) LIMIT 1', [ob.email]);
+    const platformUserId = (existingUser.rowCount ?? 0) > 0 ? String(existingUser.rows[0].id_user_pk) : nextId("USR");
+
+    await getPool().query(
+      `
       INSERT INTO "PlatformUser" (
         "id_user_pk","user_email","username","name","last_name","phone_number","companyId","country_code","country_iso","department_code","city_code","dni","birth_date","gender","status","provider","avatar","created_at","updated_at"
       ) VALUES (
@@ -381,61 +662,73 @@ export async function submitSocialOnboarding(input: OnboardingSubmitInput) {
         "provider"=EXCLUDED."provider",
         "avatar"=EXCLUDED."avatar",
         "updated_at"=NOW()
-    `,
-    [
-      id,
-      normalizedEmail,
-      normalizedEmail,
-      input.firstName,
-      input.lastName,
-      input.phone,
-      input.companyId,
-      input.countryCode,
-      input.country,
-      input.department,
-      input.city,
-      normalizedDni,
-      input.birthDate,
-      input.gender,
-      "pending_approval",
-      input.provider,
-      input.avatar ?? null
-    ]
-  );
+      `,
+      [
+        platformUserId,
+        ob.email,
+        ob.email,
+        ob.name,
+        ob.last_name,
+        ob.phone_number,
+        ob.companyId,
+        ob.country_code,
+        ob.country_iso,
+        ob.department_code,
+        ob.city_code,
+        ob.dni,
+        ob.birth_date,
+        ob.gender,
+        "active",
+        ob.provider,
+        ob.avatar
+      ]
+    );
 
-  await getPool().query(
-    `INSERT INTO "AuditLog" (id,"actorType","actorId",action,entity,"entityId",metadata,"createdAt")
-     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,NOW())`,
-    [
-      nextId("ONAUDIT"),
-      "system",
-      normalizedEmail,
-      (existingResult.rowCount ?? 0) > 0 ? "update-onboarding" : "create-onboarding",
-      "PlatformUser",
-      id,
-      JSON.stringify({provider: input.provider, fromStatus: previousStatus, toStatus: "pending_approval"})
-    ]
-  );
+    await getPool().query(
+      `INSERT INTO "AuditLog" (id,"actorType","actorId",action,entity,"entityId",metadata,"createdAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,NOW())`,
+      [
+        nextId("ONAUDIT"),
+        "system",
+        actor,
+        "approve-user",
+        "PlatformUser",
+        platformUserId,
+        JSON.stringify({fromStatus: "pending_approval", toStatus: "active"})
+      ]
+    );
 
-  const saved = await getPool().query('SELECT * FROM "PlatformUser" WHERE "id_user_pk"=$1', [id]);
-  return mapRowToUser(saved.rows[0]);
-}
+    let roleId: string | null = null;
+    if (ob.metadata) {
+      try {
+        const meta = typeof ob.metadata === "string" ? JSON.parse(ob.metadata) : ob.metadata;
+        roleId = meta?.roleId || null;
+      } catch (err) {
+        console.error("Error parsing onboarding metadata", err);
+      }
+    }
 
-export async function listPendingApprovals() {
-  await ensureUserStatusCatalog();
-  const rows = await getPool().query('SELECT * FROM "PlatformUser" WHERE "status"=$1 ORDER BY "created_at" DESC', ["pending_approval"]);
-  return rows.rows.map(mapRowToUser);
-}
+    if (roleId) {
+      const { calculateRoleAssignmentSecurityHash } = await import("@/server/pgDynamicDbStore");
+      const hashPermission = await calculateRoleAssignmentSecurityHash(platformUserId, roleId, ob.companyId);
+      const userRoleId = `UR-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 
-export async function updateApprovalStatus(userId: string, actor: string, action: "approve" | "reject") {
-  await ensureUserStatusCatalog();
-  const nextStatus: OnboardingStatus = action === "approve" ? "active" : "inactive";
-  const current = await getPool().query('SELECT * FROM "PlatformUser" WHERE "id_user_pk"=$1 LIMIT 1', [userId]);
-  if ((current.rowCount ?? 0) === 0) {
-    throw new Error("User not found");
+      await getPool().query(
+        `INSERT INTO public."UserRole" (id, platform_user_id, "roleId", hash_permission, company_id, "createdAt")
+         VALUES ($1, $2, $3, $4, $5, NOW())
+         ON CONFLICT (platform_user_id, "roleId", company_id) 
+         DO UPDATE SET hash_permission = EXCLUDED.hash_permission`,
+        [userRoleId, platformUserId, roleId, hashPermission, ob.companyId]
+      );
+
+      const roleRow = await getPool().query('SELECT name FROM public."Role" WHERE id = $1 LIMIT 1', [roleId]);
+      if (roleRow.rowCount > 0) {
+        const roleName = roleRow.rows[0].name;
+        await getPool().query('UPDATE public."PlatformUser" SET position = $1 WHERE id_user_pk = $2', [roleName, platformUserId]);
+      }
+    }
   }
 
-  await getPool().query('UPDATE "PlatformUser" SET "status"=$1, "updated_at"=NOW() WHERE "id_user_pk"=$2', [nextStatus, userId]);
   await getPool().query(
     `INSERT INTO "AuditLog" (id,"actorType","actorId",action,entity,"entityId",metadata,"createdAt")
      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,NOW())`,
@@ -443,13 +736,34 @@ export async function updateApprovalStatus(userId: string, actor: string, action
       nextId("ONAUDIT"),
       "system",
       actor,
-      action === "approve" ? "approve-user" : "reject-user",
-      "PlatformUser",
+      action === "approve" ? "approve-onboarding" : "reject-onboarding",
+      "Onboarding",
       userId,
-      JSON.stringify({fromStatus: normalizeStatus(String(current.rows[0].status)), toStatus: nextStatus})
+      JSON.stringify({fromStatus: String(ob.status), toStatus: nextStatus})
     ]
   );
 
-  const updated = await getPool().query('SELECT * FROM "PlatformUser" WHERE "id_user_pk"=$1', [userId]);
-  return mapRowToUser(updated.rows[0]);
+  const updated = await getPool().query('SELECT * FROM "Onboarding" WHERE "id"=$1', [userId]);
+  const row = updated.rows[0];
+  return {
+    id: String(row.id),
+    email: String(row.email),
+    firstName: String(row.name ?? ""),
+    lastName: String(row.last_name ?? ""),
+    fullName: `${String(row.name ?? "")} ${String(row.last_name ?? "")}`.trim(),
+    phone: String(row.phone_number ?? ""),
+    companyId: String(row.companyId ?? ""),
+    countryCode: String(row.country_code),
+    country: String(row.country_iso ?? ""),
+    department: String(row.department_code ?? ""),
+    city: String(row.city_code ?? ""),
+    dni: String(row.dni),
+    birthDate: String(row.birth_date),
+    gender: String(row.gender),
+    status: normalizeStatus(String(row.status)),
+    provider: String(row.provider ?? "google") as SocialProvider,
+    avatar: row.avatar ? String(row.avatar) : undefined,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
 }

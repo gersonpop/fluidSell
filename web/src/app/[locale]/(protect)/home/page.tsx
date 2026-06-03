@@ -27,7 +27,7 @@ export default async function ProtectedHomePage({params}: ProtectedHomePageProps
     redirect(`/${locale}/pending-approval`);
   }
   if (navigation.flow === "PROVIDER_CONFLICT") {
-    redirect(`/${locale}`);
+    redirect(`/${locale}/onboarding`);
   }
 
   return (

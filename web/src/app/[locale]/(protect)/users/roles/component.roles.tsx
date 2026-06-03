@@ -1,6 +1,6 @@
 "use client";
 
-import {Fragment, useCallback, useEffect, useMemo, useState} from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 // Claves de caché de cliente estandarizadas
 const MODULES_CACHE_KEY = "roles_modules_cache";
@@ -57,10 +57,10 @@ function renderModuleIcon(icon?: string | null) {
   if (isImageIcon(icon)) {
     return (
       <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-400 p-1 shadow-sm shrink-0">
-        <img 
-          src={icon} 
-          alt="icon" 
-          className="h-4 w-4 object-contain" 
+        <img
+          src={icon}
+          alt="icon"
+          className="h-4 w-4 object-contain"
           style={{ filter: "drop-shadow(0px 0.5px 1px rgba(0,0,0,0.5))" }}
         />
       </div>
@@ -107,7 +107,7 @@ export function DynamicComponent() {
     }
   }, [successMessage, showToast]);
   const [isEditing, setIsEditing] = useState(false);
-  
+
   // Metadatos del Rol Seleccionado
   const [roleForm, setRoleForm] = useState({
     key_id: "",
@@ -269,7 +269,7 @@ export function DynamicComponent() {
     isOpen: false,
     title: "",
     message: "",
-    onConfirm: () => {}
+    onConfirm: () => { }
   });
 
   const showConfirm = (
@@ -285,7 +285,7 @@ export function DynamicComponent() {
       message,
       onConfirm: async () => {
         await onConfirm();
-        setConfirmModal((prev) => ({...prev, isOpen: false}));
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
       },
       confirmLabel,
       confirmVariant
@@ -337,7 +337,7 @@ export function DynamicComponent() {
   };
 
   const setFormField = (fieldName: string, value: string) => {
-    setRoleForm((prev) => ({...prev, [fieldName]: value}));
+    setRoleForm((prev) => ({ ...prev, [fieldName]: value }));
   };
 
   const headers = useMemo(
@@ -398,9 +398,9 @@ export function DynamicComponent() {
       try {
         // Fetch Módulos, Roles y Catálogo de Scopes en paralelo
         const [modRes, roleRes, scopesRes] = await Promise.all([
-          fetch("/api/v1/db/modules", {headers}),
-          fetch("/api/v1/db/roles", {headers}),
-          fetch("/api/v1/db/st_multidata", {headers}).catch(() => null)
+          fetch("/api/v1/db/modules", { headers }),
+          fetch("/api/v1/db/roles", { headers }),
+          fetch("/api/v1/db/st_multidata", { headers }).catch(() => null)
         ]);
 
         const modBody = await modRes.json();
@@ -503,13 +503,13 @@ export function DynamicComponent() {
 
   const tableColumns = useMemo(() => {
     return [
-      {key: "key_id", label: "ID Clave"},
-      {key: "name", label: "Nombre"},
-      {key: "description", label: "Descripción"},
-      {key: "scope", label: "Alcance (Scope)"},
-      {key: "permissions_count", label: "Cant. Permisos"},
-      {key: "integrity", label: "Integridad"},
-      {key: "actions", label: "Acciones"}
+      { key: "key_id", label: "ID Clave" },
+      { key: "name", label: "Nombre" },
+      { key: "description", label: "Descripción" },
+      { key: "scope", label: "Alcance (Scope)" },
+      { key: "permissions_count", label: "Cant. Permisos" },
+      { key: "integrity", label: "Integridad" },
+      { key: "actions", label: "Acciones" }
     ];
   }, []);
 
@@ -567,7 +567,7 @@ export function DynamicComponent() {
       if (!response.ok) {
         throw new Error(resBody.message ?? "Ocurrió un error al reparar el cargo.");
       }
-      
+
       const resData = resBody.data;
       if (resData?.ok) {
         setRepairResult({
@@ -670,7 +670,7 @@ export function DynamicComponent() {
       // Ordenar jerárquicamente: padres primero, hijos inmediatamente debajo
       const ordered: any[] = [];
       const parents = items.filter((m) => m.parent === "/" || m.parent === "mobile-root");
-      
+
       parents.forEach((parent) => {
         ordered.push(parent);
         const children = items.filter((m) => m.parent === parent.id);
@@ -714,7 +714,7 @@ export function DynamicComponent() {
 
   const handleCheckboxChange = (moduleId: string, type: keyof Permission) => {
     if (!isEditing) return;
-    
+
     const current = permissions[moduleId] || { read: false, create: false, update: false, delete: false, microroles: {} };
 
     // Si se está quitando el permiso de lectura y existen otros permisos activos
@@ -759,7 +759,7 @@ export function DynamicComponent() {
     setPermissions((prev) => {
       const currentPerm = prev[moduleId] || { read: false, create: false, update: false, delete: false, microroles: {} };
       const nextVal = !currentPerm[type as keyof Permission];
-      
+
       // Auto-activar lectura si se otorga cualquier permiso del CRUD
       let nextRead = currentPerm.read;
       if (type !== "read" && nextVal) {
@@ -783,7 +783,7 @@ export function DynamicComponent() {
       const modulePerm = prev[moduleId] || { read: false, create: false, update: false, delete: false, microroles: {} };
       const currentMicros = modulePerm.microroles || {};
       const nextMicroVal = !currentMicros[microKey];
-      
+
       // Auto-activar lectura si se habilita un microrol
       let nextRead = modulePerm.read;
       if (nextMicroVal) {
@@ -814,7 +814,7 @@ export function DynamicComponent() {
   const addCustomMicroRole = (moduleId: string) => {
     const name = (newMicroNames[moduleId] || "").trim();
     if (!name) return;
-    
+
     const key = name.toLowerCase().replace(/[^a-z0-9]+/g, "_");
     setCustomMicroRoles((prev) => {
       const list = prev[moduleId] || [];
@@ -833,22 +833,22 @@ export function DynamicComponent() {
     try {
       const response = await fetch("/api/v1/db/roles", {
         method: "PATCH",
-        headers: {...headers, "content-type": "application/json"},
+        headers: { ...headers, "content-type": "application/json" },
         body: JSON.stringify({ id: selectedRoleId, permissions })
       });
-      
+
       if (!response.ok) throw new Error("No se pudo guardar la configuración de permisos");
-      
+
       if (typeof window !== "undefined") {
         localStorage.removeItem(ROLES_CACHE_KEY);
       }
       setIsEditing(false);
-      
-      const roleRes = await fetch("/api/v1/db/roles", {headers});
+
+      const roleRes = await fetch("/api/v1/db/roles", { headers });
       const roleBody = await roleRes.json();
       const fetchedRoles = Array.isArray(roleBody?.data) ? roleBody.data : [];
       setRoles(fetchedRoles);
-      
+
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al guardar");
     } finally {
@@ -868,20 +868,20 @@ export function DynamicComponent() {
         try {
           const response = await fetch("/api/v1/db/roles", {
             method: "DELETE",
-            headers: {...headers, "content-type": "application/json"},
+            headers: { ...headers, "content-type": "application/json" },
             body: JSON.stringify({ id: item.id })
           });
           if (!response.ok) throw new Error("No se pudo eliminar el cargo");
-          
+
           if (typeof window !== "undefined") {
             localStorage.removeItem(ROLES_CACHE_KEY);
           }
-          
-          const roleRes = await fetch("/api/v1/db/roles", {headers});
+
+          const roleRes = await fetch("/api/v1/db/roles", { headers });
           const roleBody = await roleRes.json();
           const fetchedRoles = Array.isArray(roleBody?.data) ? roleBody.data : [];
           setRoles(fetchedRoles);
-          
+
           if (selectedRoleId === item.id && fetchedRoles.length > 0) {
             setSelectedRoleId(fetchedRoles[0].id);
           }
@@ -900,7 +900,7 @@ export function DynamicComponent() {
   return (
     <section className="flex-1 flex flex-col min-h-0 overflow-hidden text-slate-800 bg-white rounded-2xl border border-slate-200 p-4 sm:p-5">
       <div className="flex flex-col gap-4 flex-1 min-h-0 overflow-hidden">
-        
+
         {/* ENCABEZADO */}
         <header className="flex-shrink-0">
           <h2 className="text-2xl font-semibold">Roles y Permisos del Sistema</h2>
@@ -935,7 +935,7 @@ export function DynamicComponent() {
               <option value="SU">Super Admin</option>
             </select>
           </div>
-          
+
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
               <button
@@ -952,10 +952,10 @@ export function DynamicComponent() {
                 <div className="absolute right-0 z-20 mt-2 w-52 rounded-xl border border-slate-200 bg-white p-2 shadow-lg animate-in fade-in slide-in-from-top-1 duration-150">
                   {tableColumns.map((column) => (
                     <label key={column.key} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50 text-slate-700 font-medium">
-                      <input 
-                        type="checkbox" 
-                        checked={visibleColumns.has(column.key)} 
-                        onChange={() => toggleColumn(column.key)} 
+                      <input
+                        type="checkbox"
+                        checked={visibleColumns.has(column.key)}
+                        onChange={() => toggleColumn(column.key)}
                         className="h-4 w-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500"
                       />
                       <span>{column.label}</span>
@@ -964,14 +964,8 @@ export function DynamicComponent() {
                 </div>
               ) : null}
             </div>
-            
-            <button 
-              type="button"
-              onClick={handleAddRole} 
-              className="rounded-xl bg-[#2ad072] px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-600 transition shadow-sm"
-            >
-              Agregar Cargo
-            </button>
+
+
           </div>
         </div>
 
@@ -1003,9 +997,9 @@ export function DynamicComponent() {
                 {headerColumns.map((column) => (
                   <th key={column.key} className={`px-4 py-3 ${column.key === "actions" ? "text-center" : ""}`}>
                     {column.key !== "actions" ? (
-                      <button 
+                      <button
                         type="button"
-                        className="font-semibold text-slate-500 hover:text-slate-700 transition" 
+                        className="font-semibold text-slate-500 hover:text-slate-700 transition"
                         onClick={() => setSort(column.key as keyof RoleRecord)}
                       >
                         {column.label} {sortBy === column.key && (sortDir === "asc" ? " ▲" : " ▼")}
@@ -1114,20 +1108,20 @@ export function DynamicComponent() {
         <div className="flex flex-col items-start justify-between gap-3 text-sm text-slate-500 sm:flex-row sm:items-center flex-shrink-0 pt-2">
           <p>Mostrando {pagedRoles.length} de {visibleRoles.length} cargos</p>
           <div className="flex items-center gap-2 select-none font-semibold">
-            <button 
-              type="button" 
-              onClick={() => setPage((prev) => Math.max(1, prev - 1))} 
-              disabled={safePage <= 1} 
+            <button
+              type="button"
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              disabled={safePage <= 1}
               className="rounded-xl border border-slate-200 px-4 py-1.5 hover:bg-slate-50 disabled:opacity-40 transition"
             >
               Anterior
             </button>
             <span className="rounded-xl bg-[#9b5de5] px-3.5 py-1.5 text-white font-bold">{safePage}</span>
             <span>de {totalPages}</span>
-            <button 
-              type="button" 
-              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} 
-              disabled={safePage >= totalPages} 
+            <button
+              type="button"
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+              disabled={safePage >= totalPages}
               className="rounded-xl border border-slate-200 px-4 py-1.5 hover:bg-slate-50 disabled:opacity-40 transition"
             >
               Siguiente
@@ -1145,9 +1139,8 @@ export function DynamicComponent() {
             onClick={closeDrawer}
           />
           <aside
-            className={`absolute right-0 top-0 h-full w-full max-w-[480px] overflow-y-auto bg-white shadow-2xl transition-transform duration-220 ease-out flex flex-col ${
-              drawerVisible ? "translate-x-0" : "translate-x-full"
-            }`}
+            className={`absolute right-0 top-0 h-full w-full max-w-[480px] overflow-y-auto bg-white shadow-2xl transition-transform duration-220 ease-out flex flex-col ${drawerVisible ? "translate-x-0" : "translate-x-full"
+              }`}
           >
             {/* HEADER DEL DRAWER */}
             <div className="flex items-start justify-between border-b border-slate-100 px-6 py-5 bg-slate-50/60 flex-shrink-0">
@@ -1278,9 +1271,9 @@ export function DynamicComponent() {
       {permissionsModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-md" onClick={() => { if (!saving) setPermissionsModalOpen(false); }} />
-          
+
           <div className="relative bg-white rounded-2xl border border-slate-100 shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200">
-            
+
             {/* ENCABEZADO */}
             <div className="flex items-center justify-between border-b border-slate-100 p-5 bg-slate-50/50 flex-shrink-0">
               <div className="flex items-center gap-3">
@@ -1329,7 +1322,7 @@ export function DynamicComponent() {
             <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-slate-200 bg-slate-50/30">
               {sections.map((sect) => (
                 <div key={sect.category} className="overflow-hidden rounded-xl border border-slate-100 bg-white shadow-sm">
-                  
+
                   {/* HEADER DE LA CATEGORÍA */}
                   <div className="bg-slate-100 px-4 py-2 text-center text-xs font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">
                     {sect.category}
@@ -1375,7 +1368,7 @@ export function DynamicComponent() {
                                 <span>{item.name}</span>
                                 <span className="text-[10px] text-slate-400 font-mono">({item.route})</span>
                               </td>
-                              
+
                               {/* CHECKBOXES DE PERMISOS */}
                               {(["read", "create", "update", "delete"] as Array<"read" | "create" | "update" | "delete">).map((type) => (
                                 <td key={type} className="py-3 text-center">
@@ -1383,11 +1376,10 @@ export function DynamicComponent() {
                                     type="button"
                                     disabled={!isEditing}
                                     onClick={() => handleCheckboxChange(item.id, type)}
-                                    className={`inline-flex h-5 w-5 items-center justify-center rounded-md border text-white transition focus:outline-none ${
-                                      perm[type]
+                                    className={`inline-flex h-5 w-5 items-center justify-center rounded-md border text-white transition focus:outline-none ${perm[type]
                                         ? "bg-[#9b5de5] border-[#9b5de5] shadow-sm shadow-purple-200"
                                         : "border-slate-200 hover:border-slate-300 bg-white"
-                                    } ${!isEditing ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
+                                      } ${!isEditing ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
                                   >
                                     {perm[type] && (
                                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="h-3 w-3">
@@ -1404,11 +1396,10 @@ export function DynamicComponent() {
                                   <button
                                     type="button"
                                     onClick={() => toggleExpand(item.id)}
-                                    className={`relative rounded-xl px-3 py-1 text-xs font-semibold border transition duration-150 ${
-                                      isExpanded 
-                                        ? "bg-white text-purple-600 border-purple-600 font-bold shadow-sm shadow-purple-50" 
+                                    className={`relative rounded-xl px-3 py-1 text-xs font-semibold border transition duration-150 ${isExpanded
+                                        ? "bg-white text-purple-600 border-purple-600 font-bold shadow-sm shadow-purple-50"
                                         : "bg-white hover:bg-slate-50 text-slate-500 border-slate-200"
-                                    }`}
+                                      }`}
                                   >
                                     {isExpanded ? "Ocultar" : "Acciones"}
                                     {(() => {
@@ -1443,7 +1434,7 @@ export function DynamicComponent() {
                                       {(() => {
                                         const rawActions = Array.isArray(item.actions) ? item.actions : [];
                                         const moduleMicros = rawActions.filter((act: any) => (act.status ?? 'active') === 'active' || act.status === 'deprecated');
-                                        
+
                                         if (moduleMicros.length === 0) {
                                           return (
                                             <p className="text-xs text-slate-400 italic col-span-full">No hay acciones de negocio definidas.</p>
@@ -1456,13 +1447,12 @@ export function DynamicComponent() {
                                           const isDeprecated = micro.status === "deprecated";
 
                                           return (
-                                            <div 
-                                              key={key} 
-                                              className={`flex items-center justify-between rounded-xl border p-2.5 text-xs font-medium shadow-sm transition gap-2 group text-left ${
-                                                isDeprecated 
-                                                  ? "border-amber-200 bg-amber-50/20 hover:bg-amber-50/30" 
+                                            <div
+                                              key={key}
+                                              className={`flex items-center justify-between rounded-xl border p-2.5 text-xs font-medium shadow-sm transition gap-2 group text-left ${isDeprecated
+                                                  ? "border-amber-200 bg-amber-50/20 hover:bg-amber-50/30"
                                                   : "border-slate-200 bg-white hover:bg-slate-50"
-                                              }`}
+                                                }`}
                                             >
                                               <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
                                                 <input
@@ -1548,9 +1538,9 @@ export function DynamicComponent() {
       {repairModalOpen && repairRoleItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-md" onClick={() => { if (!repairLoading) setRepairModalOpen(false); }} />
-          
+
           <div className="relative bg-white rounded-3xl border border-slate-100 shadow-2xl w-full max-w-2xl overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[85vh]">
-            
+
             {/* ENCABEZADO */}
             <div className="flex items-center justify-between border-b border-slate-100 p-6 bg-rose-50/50 flex-shrink-0">
               <div className="flex items-center gap-3">
@@ -1568,7 +1558,7 @@ export function DynamicComponent() {
                   </span>
                 </div>
               </div>
-              
+
               <button
                 type="button"
                 onClick={() => setRepairModalOpen(false)}
@@ -1736,13 +1726,13 @@ export function DynamicComponent() {
       {modalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           {/* BACKDROP BLUR (GLASSMORPHISM) */}
-          <div 
+          <div
             className="absolute inset-0 bg-slate-950/40 backdrop-blur-md transition-opacity duration-300"
             onClick={() => setModalOpen(false)}
           />
-          
+
           {/* CONTENEDOR DEL MODAL PREMIUM */}
-          <form 
+          <form
             onSubmit={handleModalSubmit}
             className="relative bg-white rounded-2xl border border-slate-100 shadow-2xl p-6 w-full max-w-[400px] flex flex-col gap-5 transform transition-all animate-in fade-in zoom-in-95 duration-200"
           >
@@ -1762,7 +1752,7 @@ export function DynamicComponent() {
                   {modalType === "create" ? `Módulo: ${modalModuleName}` : "Actualizar acción"}
                 </span>
               </div>
-              
+
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}
@@ -1778,7 +1768,7 @@ export function DynamicComponent() {
             {/* CUERPO DEL FORMULARIO */}
             <div className="flex flex-col gap-4">
               <p className="text-xs text-slate-500 leading-relaxed">
-                {modalType === "create" 
+                {modalType === "create"
                   ? "Las acciones te permiten definir permisos ultra-específicos de negocio para este módulo de manera dinámica."
                   : "Modifica el nombre de la acción seleccionada. Los cambios se aplicarán de inmediato en la grilla de control."}
               </p>
@@ -1820,7 +1810,7 @@ export function DynamicComponent() {
       )}
       {confirmModal.isOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm transition-opacity duration-200" onClick={() => setConfirmModal((prev) => ({...prev, isOpen: false}))} />
+          <div className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm transition-opacity duration-200" onClick={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))} />
           <div className="relative z-10 w-full max-w-md transform rounded-2xl bg-white p-6 shadow-2xl transition-all duration-200 scale-100 opacity-100 border border-slate-100">
             <div className="flex flex-col items-center text-center">
               <div className={`flex h-12 w-12 items-center justify-center rounded-full ${confirmModal.confirmVariant === "danger" ? "bg-rose-50 text-rose-600" : "bg-amber-50 text-amber-600"} mb-4`}>
@@ -1834,7 +1824,7 @@ export function DynamicComponent() {
             <div className="mt-6 flex justify-end gap-3">
               <button
                 type="button"
-                onClick={() => setConfirmModal((prev) => ({...prev, isOpen: false}))}
+                onClick={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
                 className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
               >
                 Cancelar
@@ -1858,15 +1848,14 @@ export function DynamicComponent() {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`flex items-start gap-3 p-4 rounded-xl shadow-lg border transition-all duration-300 pointer-events-auto transform translate-y-0 ${
-              toast.type === "success"
+            className={`flex items-start gap-3 p-4 rounded-xl shadow-lg border transition-all duration-300 pointer-events-auto transform translate-y-0 ${toast.type === "success"
                 ? "bg-emerald-50 border-emerald-200 text-emerald-800"
                 : toast.type === "warning"
-                ? "bg-amber-50 border-amber-200 text-amber-800"
-                : toast.type === "info"
-                ? "bg-blue-50 border-blue-200 text-blue-800"
-                : "bg-rose-50 border-rose-200 text-rose-800"
-            }`}
+                  ? "bg-amber-50 border-amber-200 text-amber-800"
+                  : toast.type === "info"
+                    ? "bg-blue-50 border-blue-200 text-blue-800"
+                    : "bg-rose-50 border-rose-200 text-rose-800"
+              }`}
           >
             {toast.type === "success" && (
               <svg className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

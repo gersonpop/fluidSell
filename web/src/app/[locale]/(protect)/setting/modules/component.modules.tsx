@@ -114,6 +114,7 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"table" | "structure">("table");
 
   const [toasts, setToasts] = useState<Array<{
     id: string;
@@ -397,6 +398,18 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
     window.setTimeout(() => setFormDrawerVisible(true), 10);
   }
 
+  function openCreateFormWithPreset(presetParent: string, presetDestination: string, presetContent: string = "newPage") {
+    clearFormState();
+    setForm((current) => ({
+      ...current,
+      parent: presetParent,
+      destination: presetDestination,
+      content: presetContent
+    }));
+    setIsFormOpen(true);
+    window.setTimeout(() => setFormDrawerVisible(true), 10);
+  }
+
   function onEdit(item: ModuleItem) {
     setIsFormOpen(true);
     window.setTimeout(() => setFormDrawerVisible(true), 10);
@@ -438,7 +451,8 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
     const errors: Partial<Record<keyof typeof defaultForm, string>> = {};
     if (!form.name.trim()) errors.name = t("errors.requiredName");
     if (!form.scope_id.trim()) errors.scope_id = t("errors.requiredScope");
-    if (!form.sort_order.trim() || Number.isNaN(Number(form.sort_order))) {
+    const cleanSortOrder = form.sort_order.replace(",", ".");
+    if (!form.sort_order.trim() || Number.isNaN(Number(cleanSortOrder))) {
       errors.sort_order = t("errors.numericOrder");
     }
     if (!form.status.trim()) errors.status = t("errors.requiredStatus");
@@ -452,7 +466,7 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
     try {
       const payload = {
         ...form,
-        sort_order: Number(form.sort_order),
+        sort_order: Number(cleanSortOrder),
         parent: form.parent,
         description: form.description || null,
         route: form.route || null,
@@ -581,6 +595,297 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
     }
   };
 
+  const getChildren = useCallback((parentId: string) => {
+    return [...modules]
+      .filter((m) => m.parent === parentId)
+      .sort((a, b) => a.sort_order - b.sort_order);
+  }, [modules]);
+
+  const getApplicationRootModules = useCallback((dest: string) => {
+    return [...modules]
+      .filter((m) => m.destination === dest && (m.parent === "/" || !m.parent))
+      .sort((a, b) => a.sort_order - b.sort_order);
+  }, [modules]);
+
+  const activeDestinations = useMemo(() => {
+    if (destinations.length > 0) return destinations;
+    return [
+      { value: "web", label: "Web" },
+      { value: "mobile", label: "Mobile" }
+    ];
+  }, [destinations]);
+
+  const renderLeftNode = (module: ModuleItem, visited = new Set<string>()): React.ReactNode => {
+    const nodeKey = module.id;
+    if (visited.has(nodeKey)) return null;
+
+    const nextVisited = new Set(visited);
+    nextVisited.add(nodeKey);
+
+    const children = getChildren(module.id);
+    const content = module.content || "";
+    const isSection = content === "section";
+    const isEmbedded = content === "embedded";
+    const canAddPage = isSection || isEmbedded;
+    const moduleName = module.name;
+
+    let cardStyle = "bg-white border-slate-200 text-slate-700";
+    if (isSection) {
+      cardStyle = "bg-purple-50/40 border-purple-100 text-purple-900";
+    } else if (isEmbedded) {
+      cardStyle = "bg-emerald-50/40 border-emerald-100 text-emerald-900";
+    }
+
+    if (canAddPage && children.length > 0) {
+      return (
+        <div
+          key={`left-${module.id}`}
+          className={`cursor-pointer rounded-xl border p-2.5 shadow-sm transition hover:shadow-md ${cardStyle}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onEdit(module);
+          }}
+        >
+          <div className="flex min-h-8 items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              {module.icon ? (
+                <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200/60 p-1 shrink-0">
+                  <Image src={module.icon} alt="Icon" width={16} height={16} className="h-full w-full object-contain" unoptimized />
+                </div>
+              ) : (
+                <span className="grid h-6 w-6 place-items-center rounded bg-slate-200/50 text-[10px] font-bold text-slate-500 shrink-0">
+                  {moduleName.slice(0, 1).toUpperCase()}
+                </span>
+              )}
+              <p className="truncate text-xs font-bold uppercase tracking-wider">{moduleName}</p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white hover:bg-blue-700 transition"
+                title="Agregar submódulo"
+                onClick={() => {
+                  openCreateFormWithPreset(module.id, module.destination || "");
+                }}
+              >
+                +
+              </button>
+            </div>
+          </div>
+          <div className="mt-2 space-y-2 border-l-2 border-slate-200/60 pl-3.5">
+            {children.map((child) => renderLeftNode(child, nextVisited))}
+          </div>
+        </div>
+      );
+    }
+
+    if (canAddPage) {
+      return (
+        <div
+          key={`left-${module.id}`}
+          className={`flex min-h-8 cursor-pointer items-center justify-between gap-2 rounded-xl border p-2 shadow-sm transition hover:shadow-md ${cardStyle}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onEdit(module);
+          }}
+        >
+          <div className="flex min-w-0 items-center gap-2">
+            {module.icon ? (
+              <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200/60 p-1 shrink-0">
+                <Image src={module.icon} alt="Icon" width={16} height={16} className="h-full w-full object-contain" unoptimized />
+              </div>
+            ) : (
+              <span className="grid h-6 w-6 place-items-center rounded bg-slate-200/50 text-[10px] font-bold text-slate-500 shrink-0">
+                {moduleName.slice(0, 1).toUpperCase()}
+              </span>
+            )}
+            <p className="truncate text-xs font-medium text-slate-500">{moduleName} (Vacío)</p>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white hover:bg-blue-700 transition"
+              title="Agregar submódulo"
+              onClick={() => {
+                openCreateFormWithPreset(module.id, module.destination || "");
+              }}
+            >
+              +
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        key={`left-${module.id}`}
+        className="flex min-h-8 cursor-pointer items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50/50 p-2 shadow-2xs hover:bg-slate-50 transition"
+        onClick={(event) => {
+          event.stopPropagation();
+          onEdit(module);
+        }}
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          {module.icon ? (
+            <div className="flex h-6 w-6 items-center justify-center rounded bg-slate-200/60 p-1 shrink-0">
+              <Image src={module.icon} alt="Icon" width={16} height={16} className="h-full w-full object-contain" unoptimized />
+            </div>
+          ) : (
+            <span className="grid h-6 w-6 place-items-center rounded bg-slate-200/50 text-[10px] font-bold text-slate-500 shrink-0">
+              {moduleName.slice(0, 1).toUpperCase()}
+            </span>
+          )}
+          <p className="truncate text-xs font-semibold text-slate-700">{moduleName}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className="flex h-6 w-6 items-center justify-center rounded-lg border border-purple-200 bg-purple-50 text-purple-600 hover:bg-purple-100 transition"
+            title="Gestionar Acciones"
+            onClick={() => handleOpenActionsModal(module)}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor" className="h-3 w-3">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.249-8.25-3.286Zm0 13.036h.008v.008H12v-.008Z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderMetaRow = (module: ModuleItem) => {
+    const contentLabel = pageContents.find(p => p.value === module.content)?.label ?? module.content ?? "-";
+    const statusLabel = module.status === "active" ? "Activo" : "Inactivo";
+    
+    return (
+      <div 
+        key={`metarow-${module.id}`} 
+        className="grid min-h-9 grid-cols-5 items-center border border-slate-100 rounded-full bg-slate-50/50 text-center text-xs text-slate-500 font-medium px-2 py-1 hover:bg-slate-100/50 transition cursor-pointer select-none"
+        onClick={() => onEdit(module)}
+      >
+        <span className="truncate">{contentLabel}</span>
+        <span className="font-mono text-2xs truncate" title={module.parent || "/"}>{module.parent || "/"}</span>
+        <span className="truncate font-mono text-2xs" title={module.route || "-"}>{module.route || "-"}</span>
+        <span>{module.sort_order}</span>
+        <span className={module.status === "active" ? "text-emerald-600 font-bold" : "text-rose-500 font-bold"}>
+          {statusLabel}
+        </span>
+      </div>
+    );
+  };
+
+  const renderMetaRows = (module: ModuleItem, visited = new Set<string>()): React.ReactNode => {
+    const nodeKey = module.id;
+    if (visited.has(nodeKey)) return null;
+
+    const nextVisited = new Set(visited);
+    nextVisited.add(nodeKey);
+
+    const children = getChildren(module.id);
+
+    return (
+      <div key={`meta-group-${module.id}`} className="space-y-2">
+        {renderMetaRow(module)}
+        {children.map((child) => renderMetaRows(child, nextVisited))}
+      </div>
+    );
+  };
+
+  const renderMetaHeader = () => (
+    <div className="grid min-h-10 grid-cols-5 items-center rounded-full bg-slate-100 text-center text-xs font-bold text-slate-500 px-4 py-2 shrink-0 border border-slate-200 select-none">
+      <span>TIPO</span>
+      <span>PADRE (ID)</span>
+      <span>RUTA</span>
+      <span>ORDEN</span>
+      <span>ESTADO</span>
+    </div>
+  );
+
+  const renderStructureNode = (module: ModuleItem) => {
+    const content = module.content || "";
+    const isEmbedded = content === "embedded";
+    const children = isEmbedded ? getChildren(module.id) : [];
+
+    if (isEmbedded && children.length > 0) {
+      return (
+        <div key={`aligned-${module.id}`} className="grid gap-4 lg:grid-cols-[280px_1fr] border border-slate-100/85 rounded-xl bg-slate-50/30 p-2.5">
+          <div 
+            className="rounded-xl border border-emerald-100 bg-emerald-50/30 p-3 hover:bg-emerald-50/50 transition cursor-pointer shadow-2xs"
+            onClick={(event) => { 
+              event.stopPropagation(); 
+              onEdit(module); 
+            }}
+          >
+            <div className="flex items-center justify-between mb-2 pb-1 border-b border-emerald-100/50">
+              <div className="flex items-center gap-1.5 min-w-0">
+                {module.icon ? (
+                  <div className="flex h-5 w-5 items-center justify-center rounded bg-slate-200/50 p-1 shrink-0">
+                    <Image src={module.icon} alt="Icon" width={14} height={14} className="h-full w-full object-contain" unoptimized />
+                  </div>
+                ) : (
+                  <span className="grid h-5 w-5 place-items-center rounded bg-slate-200/40 text-[9px] font-bold text-slate-500 shrink-0">
+                    {module.name.slice(0,1).toUpperCase()}
+                  </span>
+                )}
+                <p className="truncate text-xs font-bold uppercase tracking-wider text-emerald-950">{module.name}</p>
+              </div>
+              <button
+                type="button"
+                className="flex h-4.5 w-4.5 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white hover:bg-blue-700 transition"
+                title="Agregar submódulo"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openCreateFormWithPreset(module.id, module.destination || "");
+                }}
+              >
+                +
+              </button>
+            </div>
+            
+            <div className="space-y-1.5 pl-1">
+              {children.map((child) => {
+                return (
+                  <div
+                    key={`menu-${child.id}`}
+                    className="flex min-h-8 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs hover:bg-black/5 text-emerald-900/80 hover:text-emerald-950 font-medium transition"
+                    onClick={(event) => { 
+                      event.stopPropagation(); 
+                      onEdit(child); 
+                    }}
+                  >
+                    {child.icon ? (
+                      <div className="flex h-4.5 w-4.5 items-center justify-center rounded bg-slate-200/50 p-0.5 shrink-0">
+                        <Image src={child.icon} alt="Icon" width={12} height={12} className="h-full w-full object-contain" unoptimized />
+                      </div>
+                    ) : (
+                      <span className="text-[10px] font-bold shrink-0">◦</span>
+                    )}
+                    <span className="truncate">{child.name}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="space-y-2">
+            {renderMetaRows(module)}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div key={`aligned-${module.id}`} className="grid gap-4 lg:grid-cols-[280px_1fr] border border-slate-100/85 rounded-xl bg-slate-50/30 p-2.5">
+        <div className="space-y-2">
+          {renderLeftNode(module)}
+        </div>
+        <div className="space-y-2">
+          {renderMetaRows(module)}
+        </div>
+      </div>
+    );
+  };
+
   if (loading) {
     return <section className="rounded-2xl border border-slate-200 bg-white p-5 text-slate-600">{t("loadingModules")}</section>;
   }
@@ -588,13 +893,43 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
   return (
     <section className="h-full flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 text-slate-700 sm:p-5">
       <article className="h-full flex flex-col overflow-hidden space-y-4">
-        <header className="shrink-0">
-          <h2 className="text-2xl font-semibold">{t("title")}</h2>
-          <p className="text-sm text-slate-500">{t("description")}</p>
+        <header className="shrink-0 flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-semibold">{t("title")}</h2>
+            <p className="text-sm text-slate-500">{t("description")}</p>
+          </div>
+          
+          {/* Selector de pestañas */}
+          <div className="flex border border-slate-200 bg-slate-50 p-1 rounded-xl shrink-0 select-none">
+            <button
+              type="button"
+              onClick={() => setActiveTab("table")}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition duration-150 ${
+                activeTab === "table"
+                  ? "bg-white text-slate-800 shadow-3xs font-bold"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              Vista de Tabla
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("structure")}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition duration-150 ${
+                activeTab === "structure"
+                  ? "bg-white text-slate-800 shadow-3xs font-bold"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              Vista de Estructura
+            </button>
+          </div>
         </header>
 
         <div className="flex-1 flex flex-col gap-4 overflow-hidden">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between shrink-0">
+          {activeTab === "table" ? (
+            <>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between shrink-0">
             <div className="grid w-full gap-2 md:grid-cols-[1fr_130px_160px_195px] lg:max-w-[76%]">
               <input
                 value={search}
@@ -839,15 +1174,89 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
             </table>
           </div>
 
-          <div className="mt-4 flex flex-col items-start justify-between gap-3 text-sm text-slate-500 sm:flex-row sm:items-center shrink-0">
-            <p>0 de {visibleModules.length} en seleccion</p>
+          <div className="flex flex-col items-start justify-between gap-3 text-sm text-slate-500 sm:flex-row sm:items-center shrink-0 pt-2">
+            <p>Mostrando {pagedModules.length} de {visibleModules.length} módulos</p>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={safePage <= 1} className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40">{t("pagination.previous")}</button>
-              <span className="rounded-lg bg-blue-600 px-3 py-1 text-white">{safePage}</span>
+              <button
+                type="button"
+                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                disabled={safePage <= 1}
+                className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40 transition hover:bg-slate-50"
+              >
+                {t("pagination.previous")}
+              </button>
+              <span className="rounded-lg bg-blue-600 px-3 py-1 text-white font-semibold">{safePage}</span>
               <span>de {totalPages}</span>
-              <button type="button" onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} disabled={safePage >= totalPages} className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40">{t("pagination.next")}</button>
+              <button
+                type="button"
+                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                disabled={safePage >= totalPages}
+                className="rounded-lg border border-slate-200 px-3 py-1 disabled:opacity-40 transition hover:bg-slate-50"
+              >
+                {t("pagination.next")}
+              </button>
             </div>
           </div>
+
+            </>
+          ) : (
+            <div className="flex-1 overflow-y-auto pr-1 space-y-4 min-h-0 py-2 scrollbar-thin">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/25 p-4">
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-800">Vista Previa de la Jerarquía</h3>
+                    <p className="text-xs text-slate-500">Módulos organizados según la estructura real del Sidebar de la aplicación.</p>
+                  </div>
+                  <button
+                    onClick={openCreateForm}
+                    className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition"
+                  >
+                    {t("controls.addModule")}
+                  </button>
+                </div>
+
+                <div className="space-y-6">
+                  {modules.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">
+                      No hay módulos configurados en el sistema.
+                    </p>
+                  ) : (
+                    activeDestinations.map((dest) => {
+                      const rootModules = getApplicationRootModules(dest.value);
+                      if (rootModules.length === 0) return null;
+
+                      return (
+                        <div key={`preview-group-${dest.value}`} className="space-y-3">
+                          <div className="grid gap-4 lg:grid-cols-[280px_1fr] items-center">
+                            <div className="flex min-h-10 items-center justify-between rounded-full bg-sky-50 border border-sky-100 px-4 py-1.5 shrink-0 shadow-3xs">
+                              <p className="text-xs font-extrabold text-sky-950 uppercase tracking-wider">
+                                Aplicación {dest.label}
+                              </p>
+                              <button
+                                type="button"
+                                className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white hover:bg-blue-700 transition"
+                                title="Agregar módulo raíz"
+                                onClick={() => {
+                                  openCreateFormWithPreset("/", dest.value);
+                                }}
+                              >
+                                +
+                              </button>
+                            </div>
+                            {renderMetaHeader()}
+                          </div>
+
+                          <div className="space-y-4 pl-1">
+                            {rootModules.map((module) => renderStructureNode(module))}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </article>
 

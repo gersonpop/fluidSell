@@ -436,7 +436,8 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
               headers: { ...headers, "content-type": "application/json" },
               body: JSON.stringify({
                 platform_user_id: userId,
-                roleId: selectedRoleId
+                roleId: selectedRoleId,
+                companyId: form.companyId
               })
             });
             if (!postRes.ok) {
@@ -450,7 +451,8 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
               body: JSON.stringify({
                 id: currentAssignment.id,
                 roleId: selectedRoleId,
-                platform_user_id: userId
+                platform_user_id: userId,
+                companyId: form.companyId
               })
             });
             if (!patchRes.ok) {

@@ -49,12 +49,13 @@ const TABLE_MAP = {
   st_country: 'public."st_Country"',
   st_state: 'public."st_State"',
   st_city: 'public."st_City"',
-  companies: 'public."Company"'
+  companies: 'public."Company"',
+  onboardings: 'public."Onboarding"'
 } as const;
 
 type DynamicTableName = keyof typeof TABLE_MAP;
 
-const COMPANY_SCOPED_TABLES = new Set<DynamicTableName>(["users", "oauth_sessions", "roles", "role_assignments"]);
+const COMPANY_SCOPED_TABLES = new Set<DynamicTableName>(["users", "oauth_sessions", "roles", "role_assignments", "onboardings"]);
 
 function normalizeTable(table: string): DynamicTableName {
   const normalized = table.trim().toLowerCase() as DynamicTableName;
@@ -331,8 +332,17 @@ export default async function DynamicEmbeddedPage({params}: PageProps) {
   );
 }`;
 
-    await writeFile(layoutFile, layoutContent, "utf8");
-    await writeFile(pageFile, pageContentTemplate, "utf8");
+    try {
+      await access(layoutFile, fsConstants.F_OK);
+    } catch {
+      await writeFile(layoutFile, layoutContent, "utf8");
+    }
+
+    try {
+      await access(pageFile, fsConstants.F_OK);
+    } catch {
+      await writeFile(pageFile, pageContentTemplate, "utf8");
+    }
     return;
   }
 
@@ -454,7 +464,11 @@ export function DynamicComponent() {
 
 export default DynamicComponent;`;
 
-    await writeFile(pageFile, pageTemplate, "utf8");
+    try {
+      await access(pageFile, fsConstants.F_OK);
+    } catch {
+      await writeFile(pageFile, pageTemplate, "utf8");
+    }
 
     try {
       await access(componentFile, fsConstants.F_OK);
@@ -631,7 +645,8 @@ const PK_MAP = {
   st_country: 'iso',
   st_state: 'id_state',
   st_city: 'id_city',
-  companies: 'id'
+  companies: 'id',
+  onboardings: 'id'
 } as const;
 
 function hashPassword(password: string): string {
@@ -738,6 +753,99 @@ async function deletePlatformUserRecord(actor: ActorContext, id: string) {
   if ((result.rowCount ?? 0) === 0) throw new Error("User not found");
 }
 
+async function createOnboardingRecord(actor: ActorContext, payload: Record<string, unknown>) {
+  if (actor.role !== "SU" && actor.companyId) {
+    payload.companyId = actor.companyId; // Enforce company scope for client role
+  }
+  const email = String(payload.email ?? "").trim().toLowerCase();
+  if (!email) throw new Error("email is required");
+
+  const id = `ONB-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const status = String(payload.status ?? "pending_approval").trim();
+
+  const result = await getPgPool().query(
+    `INSERT INTO public."Onboarding" (
+      id, email, name, last_name, phone_number, "companyId", 
+      country_code, country_iso, department_code, city_code, dni, birth_date, gender, provider, avatar, status, metadata, created_at, updated_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now(),now()) returning *`,
+    [
+      id,
+      email,
+      payload.name ? String(payload.name).trim() : null,
+      payload.lastName || payload.last_name ? String(payload.lastName || payload.last_name).trim() : null,
+      payload.phoneNumber || payload.phone_number ? String(payload.phoneNumber || payload.phone_number).trim() : null,
+      payload.companyId ? String(payload.companyId).trim() : null,
+      payload.countryCode || payload.country_code ? String(payload.countryCode || payload.country_code).trim() : null,
+      payload.countryIso || payload.country_iso ? String(payload.countryIso || payload.country_iso).trim() : null,
+      payload.departmentCode || payload.department_code ? String(payload.departmentCode || payload.department_code).trim() : null,
+      payload.cityCode || payload.city_code ? String(payload.cityCode || payload.city_code).trim() : null,
+      payload.dni ? String(payload.dni).trim() : null,
+      payload.birthDate || payload.birth_date ? new Date(String(payload.birthDate || payload.birth_date)) : null,
+      payload.gender ? String(payload.gender).trim() : null,
+      payload.provider ? String(payload.provider).trim() : null,
+      payload.avatar ? String(payload.avatar).trim() : null,
+      status,
+      payload.metadata ? JSON.stringify(payload.metadata) : null
+    ]
+  );
+  return result.rows[0];
+}
+
+async function updateOnboardingRecord(actor: ActorContext, id: string, patch: Record<string, unknown>) {
+  const current = await getPgPool().query('SELECT * FROM public."Onboarding" WHERE id=$1 LIMIT 1', [id]);
+  if ((current.rowCount ?? 0) === 0) throw new Error("Onboarding record not found");
+  const row = current.rows[0];
+
+  if (actor.role !== "SU" && actor.companyId && String(row.companyId) !== actor.companyId) {
+    throw new Error("Forbidden");
+  }
+
+  const next = {
+    email: patch.email !== undefined ? String(patch.email).trim().toLowerCase() : row.email,
+    name: patch.name !== undefined ? (patch.name ? String(patch.name).trim() : null) : row.name,
+    lastName: patch.lastName !== undefined ? (patch.lastName ? String(patch.lastName).trim() : null) : (patch.last_name !== undefined ? (patch.last_name ? String(patch.last_name).trim() : null) : row.last_name),
+    phoneNumber: patch.phoneNumber !== undefined ? (patch.phoneNumber ? String(patch.phoneNumber).trim() : null) : (patch.phone_number !== undefined ? (patch.phone_number ? String(patch.phone_number).trim() : null) : row.phone_number),
+    companyId: patch.companyId !== undefined ? (patch.companyId ? String(patch.companyId).trim() : null) : row.companyId,
+    countryCode: patch.countryCode !== undefined ? (patch.countryCode ? String(patch.countryCode).trim() : null) : (patch.country_code !== undefined ? (patch.country_code ? String(patch.country_code).trim() : null) : row.country_code),
+    countryIso: patch.countryIso !== undefined ? (patch.countryIso ? String(patch.countryIso).trim() : null) : (patch.country_iso !== undefined ? (patch.country_iso ? String(patch.country_iso).trim() : null) : row.country_iso),
+    departmentCode: patch.departmentCode !== undefined ? (patch.departmentCode ? String(patch.departmentCode).trim() : null) : (patch.department_code !== undefined ? (patch.department_code ? String(patch.department_code).trim() : null) : row.department_code),
+    cityCode: patch.cityCode !== undefined ? (patch.cityCode ? String(patch.cityCode).trim() : null) : (patch.city_code !== undefined ? (patch.city_code ? String(patch.city_code).trim() : null) : row.city_code),
+    dni: patch.dni !== undefined ? (patch.dni ? String(patch.dni).trim() : null) : row.dni,
+    birthDate: patch.birthDate !== undefined ? (patch.birthDate ? new Date(String(patch.birthDate)) : null) : (patch.birth_date !== undefined ? (patch.birth_date ? new Date(String(patch.birth_date)) : null) : row.birth_date),
+    gender: patch.gender !== undefined ? (patch.gender ? String(patch.gender).trim() : null) : row.gender,
+    provider: patch.provider !== undefined ? (patch.provider ? String(patch.provider).trim() : null) : row.provider,
+    avatar: patch.avatar !== undefined ? (patch.avatar ? String(patch.avatar).trim() : null) : row.avatar,
+    status: patch.status !== undefined ? String(patch.status).trim() : row.status,
+    metadata: patch.metadata !== undefined ? (patch.metadata ? JSON.stringify(patch.metadata) : null) : (row.metadata ? JSON.stringify(row.metadata) : null)
+  };
+
+  if (!next.email) throw new Error("email is required");
+
+  const result = await getPgPool().query(
+    `UPDATE public."Onboarding" SET 
+      email=$1, name=$2, last_name=$3, phone_number=$4, "companyId"=$5, 
+      country_code=$6, country_iso=$7, department_code=$8, city_code=$9, dni=$10, 
+      birth_date=$11, gender=$12, provider=$13, avatar=$14, status=$15, metadata=$16, updated_at=now() 
+     WHERE id=$17 returning *`,
+    [
+      next.email, next.name, next.lastName, next.phoneNumber, next.companyId,
+      next.countryCode, next.countryIso, next.departmentCode, next.cityCode, next.dni,
+      next.birthDate, next.gender, next.provider, next.avatar, next.status, next.metadata, id
+    ]
+  );
+  return result.rows[0];
+}
+
+async function deleteOnboardingRecord(actor: ActorContext, id: string) {
+  const current = await getPgPool().query('SELECT * FROM public."Onboarding" WHERE id=$1 LIMIT 1', [id]);
+  if ((current.rowCount ?? 0) === 0) throw new Error("Onboarding record not found");
+  if (actor.role !== "SU" && actor.companyId && String(current.rows[0].companyId) !== actor.companyId) {
+    throw new Error("Forbidden");
+  }
+  const result = await getPgPool().query('DELETE FROM public."Onboarding" WHERE id=$1 RETURNING id', [id]);
+  if ((result.rowCount ?? 0) === 0) throw new Error("Record not found");
+}
+
 /** Normaliza cualquier valor de scope al enum exacto de PostgreSQL: SU | Admin | User */
 function normalizeRoleScope(raw: string): string {
   const map: Record<string, string> = {
@@ -755,11 +863,15 @@ function normalizeRoleScope(raw: string): string {
     "client ": "User",
     "cliente": "User",
     "usr ": "User",
+    // Multicompany
+    "multicompany": "Multicompany",
+    "multicompania": "Multicompany",
+    "multicompañía": "Multicompany"
   };
   const normalized = map[raw.trim().toLowerCase()];
   if (normalized) return normalized;
   // Si ya es un valor válido del enum, lo devuelve tal cual
-  if (["SU", "Admin", "User"].includes(raw.trim())) return raw.trim();
+  if (["SU", "Admin", "User", "Multicompany"].includes(raw.trim())) return raw.trim();
   // Fallback seguro
   return "User";
 }
@@ -1142,11 +1254,11 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
       query += ' where ur.id=$1';
       values.push(id);
       if (actor.companyId) {
-        query += ' and ur.platform_user_id in (select id_user_pk from public."PlatformUser" where "companyId"=$2)';
+        query += ' and ur.company_id=$2';
         values.push(actor.companyId);
       }
     } else if (actor.companyId) {
-      query += ' join public."PlatformUser" u on u.id_user_pk = ur.platform_user_id where u."companyId"=$1';
+      query += ' where ur.company_id=$1';
       values.push(actor.companyId);
     }
     const result = await getPgPool().query(query, values);
@@ -1154,7 +1266,7 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
     // Validar la firma criptográfica de integridad de cada asignación
     const validatedRows = [];
     for (const ur of result.rows) {
-      const isValid = await validateRoleAssignmentSecurityHash(ur.platform_user_id, ur.hash_permission, ur.roleId);
+      const isValid = await validateRoleAssignmentSecurityHash(ur.platform_user_id, ur.hash_permission, ur.roleId, ur.company_id);
       if (!isValid) {
         await appendAuditDeny(
           actor,
@@ -1184,7 +1296,7 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
   }
   if (actor.role !== "SU" && COMPANY_SCOPED_TABLES.has(table)) {
     if (!actor.companyId) throw new Error("companyId is required for non-SU actors");
-    const companyCol = (table === "users") ? '"companyId"' : 'companyid';
+    const companyCol = (table === "users" || table === "onboardings") ? '"companyId"' : 'companyid';
     query += id ? ` and ${companyCol}=$2` : ` where ${companyCol}=$1`;
     values.push(actor.companyId);
   }
@@ -1209,6 +1321,7 @@ export async function createRecord(actor: ActorContext, tableParam: string, payl
   if (table === "users") return createPlatformUserRecord(actor, payload);
   if (table === "roles") return createRoleRecord(actor, payload);
   if (table === "role_assignments") return createRoleAssignmentRecord(actor, payload);
+  if (table === "onboardings") return createOnboardingRecord(actor, payload);
   ensureSu(actor);
   throw new Error(`Create is not enabled for table '${table}'`);
 }
@@ -1223,6 +1336,7 @@ export async function updateRecord(actor: ActorContext, tableParam: string, id: 
   if (table === "users") return updatePlatformUserRecord(actor, id, patch);
   if (table === "roles") return updateRoleRecord(actor, id, patch);
   if (table === "role_assignments") return updateRoleAssignmentRecord(actor, id, patch);
+  if (table === "onboardings") return updateOnboardingRecord(actor, id, patch);
   ensureSu(actor);
   throw new Error(`Update is not enabled for table '${table}'`);
 }
@@ -1250,6 +1364,10 @@ export async function deleteRecord(actor: ActorContext, tableParam: string, id: 
   }
   if (table === "role_assignments") {
     await deleteRoleAssignmentRecord(actor, id);
+    return;
+  }
+  if (table === "onboardings") {
+    await deleteOnboardingRecord(actor, id);
     return;
   }
   ensureSu(actor);
@@ -1460,7 +1578,8 @@ export function decryptWithKey(encryptedText: string, keyMaterial: string): stri
 
 export async function calculateRoleAssignmentSecurityHash(
   platformUserId: string,
-  roleId: string
+  roleId: string,
+  companyIdParam?: string | null
 ): Promise<string> {
   const roleRes = await getPgPool().query<{ id: string; scope: string; key: string; companyId: string }>(
     'select id, scope, key, "companyId" from public."Role" where id=$1 limit 1',
@@ -1471,14 +1590,14 @@ export async function calculateRoleAssignmentSecurityHash(
   }
   const role = roleRes.rows[0]!;
 
-  // Cifrado interno: positionId cifrado con el companyId del tenant
-  const positionIdCiphered = encryptWithKey(role.id, String(role.companyId));
+  const effectiveCompanyId = companyIdParam || role.companyId;
+  const positionIdCiphered = encryptWithKey(role.id, String(effectiveCompanyId));
 
   const payload = {
     scope: role.scope,
     positionName: role.key,
     positionId: positionIdCiphered,
-    companyId: Number(role.companyId)
+    companyId: Number(effectiveCompanyId)
   };
 
   const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "default-outer-salt-2849";
@@ -1490,7 +1609,8 @@ export async function calculateRoleAssignmentSecurityHash(
 export async function validateRoleAssignmentSecurityHash(
   platformUserId: string,
   hashPermission: string | null,
-  roleId: string
+  roleId: string,
+  companyIdParam?: string | null
 ): Promise<boolean> {
   if (!hashPermission) return false;
 
@@ -1506,7 +1626,7 @@ export async function validateRoleAssignmentSecurityHash(
       companyId: number;
     };
 
-    const companyIdStr = String(payload.companyId);
+    const companyIdStr = companyIdParam || String(payload.companyId);
     const decryptedRoleId = decryptWithKey(payload.positionId, companyIdStr);
 
     if (decryptedRoleId !== roleId) {
@@ -1523,7 +1643,7 @@ export async function validateRoleAssignmentSecurityHash(
     if (
       role.scope !== payload.scope ||
       role.key !== payload.positionName ||
-      String(role.companyId) !== companyIdStr
+      String(effectiveCompanyIdOrRoleCompanyId(companyIdParam, role.companyId)) !== String(payload.companyId)
     ) {
       return false;
     }
@@ -1534,12 +1654,26 @@ export async function validateRoleAssignmentSecurityHash(
   }
 }
 
+function effectiveCompanyIdOrRoleCompanyId(param: string | null | undefined, roleCompanyId: string) {
+  if (param) return param;
+  return roleCompanyId;
+}
+
 async function createRoleAssignmentRecord(actor: ActorContext, payload: Record<string, unknown>) {
   const userId = String(payload.platform_user_id || payload.platformUserId || "").trim();
   const roleId = String(payload.roleId || payload.role_id || "").trim();
+  const companyId = payload.companyId ? String(payload.companyId).trim() : null;
 
   if (!userId || !roleId) {
     throw new Error("platform_user_id and roleId are required");
+  }
+
+  let effectiveCompanyId = companyId;
+  if (!effectiveCompanyId) {
+    const roleRes = await getPgPool().query<{ companyId: string }>('select "companyId" from public."Role" where id=$1 limit 1', [roleId]);
+    if (roleRes.rows.length > 0) {
+      effectiveCompanyId = roleRes.rows[0].companyId;
+    }
   }
 
   // Validaciones de multitenancy
@@ -1562,17 +1696,18 @@ async function createRoleAssignmentRecord(actor: ActorContext, payload: Record<s
     if (String(roleRes.rows[0]!.companyId) !== String(actor.companyId)) {
       throw new Error("Forbidden: cannot assign roles belonging to other companies");
     }
+    effectiveCompanyId = actor.companyId;
   }
 
-  const hashPermission = await calculateRoleAssignmentSecurityHash(userId, roleId);
+  const hashPermission = await calculateRoleAssignmentSecurityHash(userId, roleId, effectiveCompanyId);
   const id = `UR-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 
   await getPgPool().query(
-    'insert into public."UserRole" (id, platform_user_id, "roleId", hash_permission, "createdAt") values ($1, $2, $3, $4, now())',
-    [id, userId, roleId, hashPermission]
+    'insert into public."UserRole" (id, platform_user_id, "roleId", hash_permission, company_id, "createdAt") values ($1, $2, $3, $4, $5, now())',
+    [id, userId, roleId, hashPermission, effectiveCompanyId]
   );
 
-  return { id, platform_user_id: userId, roleId, hash_permission: hashPermission };
+  return { id, platform_user_id: userId, roleId, hash_permission: hashPermission, companyId: effectiveCompanyId };
 }
 
 async function updateRoleAssignmentRecord(
@@ -1580,8 +1715,8 @@ async function updateRoleAssignmentRecord(
   id: string,
   patch: Record<string, unknown>
 ) {
-  const currentRes = await getPgPool().query<{ id: string; platform_user_id: string; roleId: string }>(
-    'select id, platform_user_id, "roleId" from public."UserRole" where id=$1 limit 1',
+  const currentRes = await getPgPool().query<{ id: string; platform_user_id: string; roleId: string; company_id: string | null }>(
+    'select id, platform_user_id, "roleId", company_id from public."UserRole" where id=$1 limit 1',
     [id]
   );
   if (currentRes.rows.length === 0) {
@@ -1591,6 +1726,9 @@ async function updateRoleAssignmentRecord(
 
   const userId = current.platform_user_id;
   const roleId = patch.roleId !== undefined ? String(patch.roleId).trim() : current.roleId;
+  const companyId = patch.companyId !== undefined ? (patch.companyId ? String(patch.companyId).trim() : null) : current.company_id;
+
+  let effectiveCompanyId = companyId;
 
   // Validaciones de multitenancy
   if (actor.role !== "SU") {
@@ -1612,16 +1750,17 @@ async function updateRoleAssignmentRecord(
     if (String(roleRes.rows[0]!.companyId) !== String(actor.companyId)) {
       throw new Error("Forbidden: cannot assign roles belonging to other companies");
     }
+    effectiveCompanyId = actor.companyId;
   }
 
-  const hashPermission = await calculateRoleAssignmentSecurityHash(userId, roleId);
+  const hashPermission = await calculateRoleAssignmentSecurityHash(userId, roleId, effectiveCompanyId);
 
   await getPgPool().query(
-    'update public."UserRole" set "roleId"=$1, hash_permission=$2 where id=$3',
-    [roleId, hashPermission, id]
+    'update public."UserRole" set "roleId"=$1, hash_permission=$2, company_id=$3 where id=$4',
+    [roleId, hashPermission, effectiveCompanyId, id]
   );
 
-  return { id, platform_user_id: userId, roleId, hash_permission: hashPermission };
+  return { id, platform_user_id: userId, roleId, hash_permission: hashPermission, companyId: effectiveCompanyId };
 }
 
 async function deleteRoleAssignmentRecord(actor: ActorContext, id: string) {
