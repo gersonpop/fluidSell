@@ -40,12 +40,48 @@ export function selectSidebarModulesFromDbRows(rows: DbModuleRecord[]) {
       sortOrder: toSortNumber(row.sort_order ?? row.sortOrder ?? row.order)
     }));
 
-  const activeNormalized = normalized.filter((item) => item.status === "active");
+  // Filter active and readable items
+  const activeNormalized = normalized.filter((item) => {
+    if (item.status !== "active") return false;
+    
+    // Check if permission read is explicitly false
+    const origRow = rows.find((r) => String(r.id || "") === item.id);
+    if (origRow && origRow.permission) {
+      const perm = origRow.permission as any;
+      if (item.pageContent !== "section" && item.pageContent !== "embedded") {
+        if (perm.read === false) {
+          return false;
+        }
+      }
+    }
+    return true;
+  });
 
-  const sections = activeNormalized.filter((item) => item.pageContent === "section");
-  const sectionIds = new Set(sections.map((item) => item.id));
+  // Prune empty sections/embedded containers
+  let filtered = activeNormalized;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const currentIds = new Set(filtered.map((m) => m.id));
 
-  return activeNormalized
+    filtered = filtered.filter((m) => {
+      const isContainer = m.pageContent === "section" || m.pageContent === "embedded";
+      if (!isContainer) return true;
+
+      const hasChildren = filtered.some((c) => c.parent === m.id);
+      if (!hasChildren) {
+        changed = true;
+        return false;
+      }
+      return true;
+    });
+  }
+
+  const finalSections = filtered.filter((item) => item.pageContent === "section");
+  const sectionIds = new Set(finalSections.map((item) => item.id));
+
+  // Render parent === "/" or child of an active section
+  return filtered
     .filter((item) => item.parent === "/" || sectionIds.has(item.parent))
     .sort((a, b) => {
       if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;

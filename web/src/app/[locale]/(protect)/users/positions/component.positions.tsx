@@ -3,6 +3,7 @@
 import {useCallback, useEffect, useMemo, useState} from "react";
 import {useTranslations} from "next-intl";
 import {useRouter} from "next/navigation";
+import {getSecureItem, setSecureItem} from "@/lib/secure-store";
 
 type RoleItem = {
   id: string;
@@ -13,6 +14,14 @@ type RoleItem = {
   company_id: string | null;
   status?: string;
   updated_at?: string | null;
+  permissions?: Record<string, {
+    read: boolean;
+    create: boolean;
+    update: boolean;
+    delete: boolean;
+    status: string;
+    microroles: any;
+  }>;
 };
 
 type ScopeItem = {id: string; value?: string; name?: string};
@@ -69,9 +78,37 @@ const defaultForm = {
 export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
   const t = useTranslations("AccountConfig");
   const router = useRouter();
+
+  const permissions = useMemo(() => {
+    if (actorRole === "SU") {
+      return { read: true, create: true, update: true, delete: true };
+    }
+    const cacheKey = `sidebar_modules_${actorId}_${companyId ?? ""}`;
+    const modules = getSecureItem<any[]>(cacheKey, actorId);
+    if (modules && Array.isArray(modules)) {
+      const match = modules.find((m) => m.route === "/users/positions");
+      if (match && match.permission) {
+        return match.permission as { read: boolean; create: boolean; update: boolean; delete: boolean };
+      }
+    }
+    return { read: true, create: false, update: false, delete: false };
+  }, [actorId, actorRole, companyId]);
   const [roles, setRoles] = useState<RoleItem[]>([]);
   const [scopes, setScopes] = useState<ScopeItem[]>([]);
   const [companies, setCompanies] = useState<CompanyItem[]>([]);
+  const [selectedCompanyFilter, setSelectedCompanyFilter] = useState<string>(companyId ?? "");
+  const [copyModalRole, setCopyModalRole] = useState<RoleItem | null>(null);
+  const [modulesList, setModulesList] = useState<any[]>([]);
+  const sortedCompanies = useMemo(() => {
+    const list = [...companies];
+    const idx = list.findIndex(c => String(c.commercialName || "").toLowerCase().includes("fluidsell"));
+    if (idx > -1) {
+      const [fs] = list.splice(idx, 1);
+      list.unshift(fs!);
+    }
+    return list;
+  }, [companies]);
+
   const [form, setForm] = useState(defaultForm);
   const [search, setSearch] = useState("");
   const [scopeFilter, setScopeFilter] = useState<string>("all");
@@ -86,6 +123,8 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState(0);
+  const [loadingMessage, setLoadingMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -161,7 +200,8 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
       "x-actor-id": actorId,
       "x-actor-role": actorRole,
       "x-company-id": companyId ?? "",
-      "content-type": "application/json"
+      "content-type": "application/json",
+      ...(actorRole === "SU" ? { "x-show-all-companies": "true" } : {})
     }),
     [actorId, actorRole, companyId]
   );
@@ -169,67 +209,74 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
   // Load static scopes from localStorage immediately on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const cached = localStorage.getItem(SCOPES_CACHE_KEY);
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed)) {
-            setScopes(parsed);
-          }
-        } catch {
-          // Ignore
-        }
+      const parsed = getSecureItem<ScopeItem[]>(SCOPES_CACHE_KEY, actorId);
+      if (parsed && Array.isArray(parsed)) {
+        setScopes(parsed);
       }
     }
-  }, []);
+  }, [actorId]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setProgress(0);
+    setLoadingMessage("Iniciando conexión con la base de datos...");
     try {
-      const fetchList = [
-        fetch("/api/v1/db/roles", {headers}),
-        fetch("/api/v1/db/st_multidata", {headers})
-      ];
-      if (actorRole === "SU") {
-        fetchList.push(fetch("/api/v1/db/companies", {headers}));
+      // 1. Modules
+      setLoadingMessage("Cargando catálogo de módulos del sistema...");
+      setProgress(10);
+      const modulesRes = await fetch("/api/v1/db/modules", {headers});
+      setProgress(25);
+      const modulesBody = await modulesRes.json();
+      if (modulesRes.ok) {
+        setModulesList(modulesBody.data ?? []);
       }
 
-      const responses = await Promise.all(fetchList);
-      
-      const rolesRes = responses[0];
-      const scopesRes = responses[1];
-      const companiesRes = responses[2];
-
-      const rolesBody = await rolesRes.json();
+      // 2. Multidata (Scopes)
+      setLoadingMessage("Cargando alcances de seguridad del sistema...");
+      setProgress(40);
+      const scopesRes = await fetch("/api/v1/db/st_multidata", {headers});
+      setProgress(55);
       const scopesBody = await scopesRes.json();
-
-      if (!rolesRes.ok) throw new Error(rolesBody.message ?? "No se pudieron cargar los cargos");
       if (!scopesRes.ok) throw new Error(scopesBody.message ?? "No se pudieron cargar los scopes");
-
-      setRoles((rolesBody.data ?? []) as RoleItem[]);
-
       const rawScopes = (scopesBody.data ?? []) as ScopeCatalogItem[];
       const roleScopes = rawScopes.filter(isRoleScope).map(normalizeScopeItem).filter((item): item is ScopeItem => item !== null);
-      
       setScopes(roleScopes);
       if (typeof window !== "undefined") {
-        localStorage.setItem(SCOPES_CACHE_KEY, JSON.stringify(roleScopes));
+        setSecureItem(SCOPES_CACHE_KEY, roleScopes, actorId);
       }
 
-      if (actorRole === "SU" && companiesRes) {
-        const companiesBody = await companiesRes.json();
+      // 3. Roles
+      setLoadingMessage("Cargando cargos de las empresas...");
+      setProgress(70);
+      const rolesRes = await fetch("/api/v1/db/roles", {headers});
+      setProgress(85);
+      const rolesBody = await rolesRes.json();
+      if (!rolesRes.ok) throw new Error(rolesBody.message ?? "No se pudieron cargar los cargos");
+      setRoles((rolesBody.data ?? []) as RoleItem[]);
+
+      // 4. Companies (for SU)
+      if (actorRole === "SU") {
+        setLoadingMessage("Cargando listado de empresas registradas...");
+        setProgress(90);
+        const companiesRes = await fetch("/api/v1/db/companies", {headers});
+        setProgress(98);
         if (companiesRes.ok) {
+          const companiesBody = await companiesRes.json();
           setCompanies((companiesBody.data ?? []) as CompanyItem[]);
         }
       }
 
+      setProgress(100);
+      setLoadingMessage("Datos cargados correctamente.");
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Error al cargar datos");
     } finally {
-      setLoading(false);
+      setTimeout(() => {
+        setLoading(false);
+      }, 400);
     }
-  }, [headers, actorRole]);
+  }, [headers, actorRole, actorId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -265,7 +312,8 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
         term.length === 0 ||
         [item.key_id, item.name, item.description ?? ""].join(" ").toLowerCase().includes(term);
       const scopeMatch = scopeFilter === "all" || item.scope === scopeFilter;
-      return textMatch && scopeMatch;
+      const companyMatch = actorRole !== "SU" || !selectedCompanyFilter || item.company_id === selectedCompanyFilter;
+      return textMatch && scopeMatch && companyMatch;
     });
 
     const sorted = [...filtered].sort((a, b) => {
@@ -287,7 +335,7 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
     });
 
     return sorted;
-  }, [roles, search, scopeFilter, sortBy, sortDir]);
+  }, [roles, search, scopeFilter, sortBy, sortDir, actorRole, selectedCompanyFilter]);
 
   const totalPages = Math.max(1, Math.ceil(visibleRoles.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -308,10 +356,12 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
       if (actorRole === "SU") {
         cols.push({key: "company_id", label: "Empresa"});
       }
-      cols.push({key: "actions", label: "Acciones"});
+      if (permissions.update || permissions.delete) {
+        cols.push({key: "actions", label: "Acciones"});
+      }
       return cols;
     },
-    [actorRole]
+    [actorRole, permissions]
   );
 
   const headerColumns = useMemo(() => tableColumns.filter((column) => visibleColumns.has(column.key) || column.key === "company_id" && actorRole === "SU"), [tableColumns, visibleColumns, actorRole]);
@@ -365,6 +415,213 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
     setFormDrawerVisible(false);
     window.setTimeout(() => setIsFormOpen(false), 220);
   }
+
+  const getModuleName = (mId: string) => {
+    const found = modulesList.find(m => m.id === mId);
+    return found ? found.name : mId;
+  };
+
+  const generateAsciiPermissions = (rolePerms: any) => {
+    if (!rolePerms || Object.keys(rolePerms).length === 0) {
+      return "No hay permisos configurados.";
+    }
+
+    // 1. Gather all active modules (those with active permissions)
+    const activeModIds = new Set<string>();
+    const modPermMap = new Map<string, any>();
+
+    Object.entries(rolePerms).forEach(([mId, perm]: [string, any]) => {
+      const hasCrud = perm.read || perm.create || perm.update || perm.delete;
+      const activeMicros = Object.entries(perm.microroles || {}).filter(([_, val]) => !!val);
+      
+      if (hasCrud || activeMicros.length > 0) {
+        activeModIds.add(mId);
+        modPermMap.set(mId, {
+          crud: perm,
+          activeMicros: activeMicros.map(([key]) => key)
+        });
+      }
+    });
+
+    // 2. Identify and include parent sections if they have active children
+    const finalNodes = new Map<string, any>();
+    activeModIds.forEach((mId) => {
+      const mod = modulesList.find((m) => m.id === mId);
+      if (!mod) return;
+
+      finalNodes.set(mId, {
+        id: mId,
+        name: mod.name,
+        parent: mod.parent || "/",
+        isSection: mod.content === "section" || mod.pageContent === "section",
+        content: mod.content || mod.pageContent || "newPage",
+        actions: mod.actions || [],
+        perm: modPermMap.get(mId)
+      });
+
+      // Trace parent
+      if (mod.parent && mod.parent !== "/" && mod.parent !== "mobile-root") {
+        const parentMod = modulesList.find((m) => m.id === mod.parent);
+        if (parentMod && !finalNodes.has(parentMod.id)) {
+          finalNodes.set(parentMod.id, {
+            id: parentMod.id,
+            name: parentMod.name,
+            parent: parentMod.parent || "/",
+            isSection: true,
+            content: parentMod.content || parentMod.pageContent || "section",
+            actions: parentMod.actions || [],
+            perm: null
+          });
+        }
+      }
+    });
+
+    const nodeList = Array.from(finalNodes.values());
+    if (nodeList.length === 0) {
+      return "No tiene permisos activos.";
+    }
+
+    // 3. Build hierarchical tree: group children by parent and sort by DB order
+    const getModuleIndex = (mId: string) => {
+      return modulesList.findIndex((m) => m.id === mId);
+    };
+
+    const roots = nodeList
+      .filter((n) => n.parent === "/" || n.parent === "mobile-root" || !nodeList.some(p => p.id === n.parent))
+      .sort((a, b) => getModuleIndex(a.id) - getModuleIndex(b.id));
+
+    const tree: any[] = [];
+    roots.forEach((root) => {
+      const children = nodeList
+        .filter((n) => n.parent === root.id)
+        .sort((a, b) => getModuleIndex(a.id) - getModuleIndex(b.id));
+      tree.push({
+        ...root,
+        children
+      });
+    });
+
+    // Helper to determine icon, name and CRUD string for a node
+    const getNodeRepresentation = (node: any) => {
+      const contentType = node.content || "newPage";
+      const hasChildrenNode = nodeList.some(n => n.parent === node.id);
+
+      let icon = "📄";
+      let showCrud = true;
+
+      if (contentType === "section") {
+        icon = hasChildrenNode ? "📂" : "📌";
+        showCrud = false; // Sections don't have CRUD permissions displayed
+      } else if (contentType === "embedded") {
+        icon = "📂";
+      } else if (contentType === "newPage") {
+        icon = "📄";
+      }
+
+      const crudArr: string[] = [];
+      if (showCrud && node.perm?.crud) {
+        if (node.perm.crud.read) crudArr.push("L");
+        if (node.perm.crud.create) crudArr.push("C");
+        if (node.perm.crud.update) crudArr.push("A");
+        if (node.perm.crud.delete) crudArr.push("E");
+      }
+      const crudStr = crudArr.length > 0 ? `  (${crudArr.join(", ")})` : "";
+
+      return `${icon} ${node.name}${crudStr}`;
+    };
+
+    // 4. Render tree using lines
+    const lines: string[] = [];
+    lines.push(`📁 ${copyModalRole?.name || "Cargo"}`);
+
+    tree.forEach((rootNode, rootIdx) => {
+      const isLastRoot = rootIdx === tree.length - 1;
+      const rootConnector = isLastRoot ? "└── " : "├── ";
+
+      const hasChildren = rootNode.children && rootNode.children.length > 0;
+      const rootLabel = getNodeRepresentation(rootNode);
+      lines.push(`${rootConnector}${rootLabel}`);
+
+      if (hasChildren) {
+        const childPrefix = isLastRoot ? "    " : "│   ";
+        rootNode.children.forEach((child: any, childIdx: any) => {
+          const isLastChild = childIdx === rootNode.children.length - 1;
+          const childConnector = isLastChild ? "└── " : "├── ";
+
+          const childLabel = getNodeRepresentation(child);
+          lines.push(`${childPrefix}${childConnector}${childLabel}`);
+
+          // Render Child Module Actions
+          const actionPrefix = childPrefix + (isLastChild ? "        " : "│       ");
+          const activeMicros = child.perm?.activeMicros || [];
+          activeMicros.forEach((microKey: string, actIdx: number) => {
+            const isLastAct = actIdx === activeMicros.length - 1;
+            const actConnector = isLastAct ? "└── " : "├── ";
+            
+            const rawActions = Array.isArray(child.actions) ? child.actions : [];
+            const actionDef = rawActions.find((a: any) => (a.id || a.key) === microKey);
+            const actionLabel = actionDef ? (actionDef.label || actionDef.name) : microKey;
+            
+            lines.push(`${actionPrefix}${actConnector}📄 Acción: ${actionLabel}`);
+          });
+        });
+      } else {
+        // Root-level module actions
+        const actionPrefix = isLastRoot ? "            " : "  │         ";
+        const activeMicros = rootNode.perm?.activeMicros || [];
+        activeMicros.forEach((microKey: string, actIdx: number) => {
+          const isLastAct = actIdx === activeMicros.length - 1;
+          const actConnector = isLastAct ? "└── " : "├── ";
+          
+          const rawActions = Array.isArray(rootNode.actions) ? rootNode.actions : [];
+          const actionDef = rawActions.find((a: any) => (a.id || a.key) === microKey);
+          const actionLabel = actionDef ? (actionDef.label || actionDef.name) : microKey;
+          
+          lines.push(`${actionPrefix}${actConnector}📄 Acción: ${actionLabel}`);
+        });
+      }
+    });
+
+    return lines.join("\n");
+  };
+
+  const handleConfirmCopy = async () => {
+    if (!copyModalRole) return;
+    setSaving(true);
+    setLoading(true);
+    setProgress(0);
+    setLoadingMessage("Estableciendo conexión y copiando estructura del cargo...");
+    try {
+      setProgress(20);
+      const response = await fetch("/api/v1/db/roles", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          copyFromRoleId: copyModalRole.id,
+          name: `${copyModalRole.name} (Copia)`,
+          company_id: companyId
+        })
+      });
+      setProgress(60);
+      setLoadingMessage("Replicando permisos y configuraciones en la base de datos...");
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message ?? "No se pudo copiar el cargo");
+      
+      setSuccess("Cargo copiado con éxito");
+      setCopyModalRole(null);
+      
+      setProgress(80);
+      setLoadingMessage("Sincronizando información de cargos actualizados...");
+      await loadData();
+      setProgress(100);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al copiar");
+      setLoading(false);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   async function onSubmit() {
     const errors: Partial<Record<keyof typeof defaultForm, string>> = {};
@@ -446,16 +703,37 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
     setSortDir("asc");
   }
 
-  if (loading && roles.length === 0) {
-    return <section className="flex-1 flex flex-col min-h-0 overflow-hidden text-slate-600 bg-white rounded-2xl border border-slate-200 p-5">Cargando Cargos...</section>;
-  }
+
 
   return (
     <section className="flex-1 flex flex-col min-h-0 overflow-hidden text-slate-700 bg-white rounded-2xl border border-slate-200 p-4 sm:p-5">
       <article className="flex flex-col gap-4 flex-1 min-h-0 overflow-hidden">
         <header className="flex-shrink-0">
-          <h2 className="text-2xl font-semibold">Administración de Cargos</h2>
-          <p className="text-sm text-slate-500">Crea y administra los cargos (roles) del sistema desde BD usando API dinámica.</p>
+          {actorRole === "SU" ? (
+            <div className="flex flex-col gap-1.5 max-w-sm mb-1">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Filtrar por Empresa</label>
+              <select
+                value={selectedCompanyFilter}
+                onChange={(e) => {
+                  setSelectedCompanyFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-800 focus:border-cyan-500 focus:outline-none"
+              >
+                <option value="">-- Todas las Empresas --</option>
+                {sortedCompanies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    🏢 {c.commercialName} {c.id === companyId ? " (Mi Empresa)" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <>
+              <h2 className="text-2xl font-semibold">Administración de Cargos</h2>
+              <p className="text-sm text-slate-550">Crea y administra los cargos (roles) del sistema desde BD usando API dinámica.</p>
+            </>
+          )}
         </header>
 
         <div className="flex flex-col gap-4 flex-1 min-h-0 overflow-hidden">
@@ -507,7 +785,9 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
                   </div>
                 ) : null}
               </div>
-              <button onClick={openCreateForm} className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700">Agregar Cargo</button>
+              {permissions.create ? (
+                <button onClick={openCreateForm} className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700">Agregar Cargo</button>
+              ) : null}
             </div>
           </div>
 
@@ -563,40 +843,62 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
                         return <td key={`${item.id}-company`} className="px-4 py-3 font-mono text-xs truncate max-w-[180px]">{compName}</td>;
                       }
                       return (
-                        <td key={`${item.id}-actions`} className="px-4 py-3 text-center">
+                        <td key={`${item.id}-actions`} className="px-4 py-3">
                           <div className="flex items-center justify-center gap-1.5">
-                            {/* Editar (Lápiz Azul) */}
-                            <div className="group relative">
-                              <button
-                                type="button"
-                                onClick={() => onEdit(item)}
-                                className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 shadow-sm hover:bg-blue-100 hover:border-blue-300 hover:text-blue-700 transition duration-150"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" className="h-4.5 w-4.5">
-                                  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-                                  <path d="m15 5 4 4" />
-                                </svg>
-                              </button>
-                              <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
-                                Editar
-                              </span>
-                            </div>
+                            {item.company_id !== companyId ? (
+                              <div className="group relative">
+                                <button
+                                  type="button"
+                                  onClick={() => setCopyModalRole(item)}
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-200 bg-cyan-50 text-cyan-600 shadow-sm hover:bg-cyan-100 hover:border-cyan-300 hover:text-cyan-700 transition duration-150 text-xs font-semibold"
+                                  title="Copiar Cargo a mi Empresa"
+                                >
+                                  📋
+                                </button>
+                                <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                  Copiar
+                                </span>
+                              </div>
+                            ) : (
+                              <>
+                                {/* Editar (Lápiz Azul) */}
+                                {permissions.update ? (
+                                  <div className="group relative">
+                                    <button
+                                      type="button"
+                                      onClick={() => onEdit(item)}
+                                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 shadow-sm hover:bg-blue-100 hover:border-blue-300 hover:text-blue-700 transition duration-150"
+                                    >
+                                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" className="h-4.5 w-4.5">
+                                        <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                                        <path d="m15 5 4 4" />
+                                      </svg>
+                                    </button>
+                                    <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                      Editar
+                                    </span>
+                                  </div>
+                                ) : null}
 
-                            {/* Eliminar (Basura Roja) */}
-                            <div className="group relative">
-                              <button
-                                type="button"
-                                onClick={() => void onDelete(item)}
-                                className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 shadow-sm hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 transition duration-150"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4.5 w-4.5">
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                                </svg>
-                              </button>
-                              <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
-                                Eliminar
-                              </span>
-                            </div>
+                                {/* Eliminar (Basura Roja) */}
+                                {permissions.delete ? (
+                                  <div className="group relative">
+                                    <button
+                                      type="button"
+                                      onClick={() => void onDelete(item)}
+                                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 shadow-sm hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 transition duration-150"
+                                    >
+                                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4.5 w-4.5">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                                      </svg>
+                                    </button>
+                                    <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                      Eliminar
+                                    </span>
+                                  </div>
+                                ) : null}
+                              </>
+                            )}
                           </div>
                         </td>
                       );
@@ -756,6 +1058,91 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
                 {confirmModal.confirmLabel}
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {copyModalRole ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm transition-opacity duration-200" onClick={() => setCopyModalRole(null)} />
+          <div className="relative z-10 w-full max-w-lg transform rounded-2xl bg-white p-6 shadow-2xl transition-all duration-200 scale-100 opacity-100 border border-slate-100">
+            <div className="flex flex-col">
+              <div className="flex items-center justify-between border-b border-slate-150 pb-3">
+                <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                  <span>📋 Copiar Cargo del Sistema</span>
+                </h3>
+                <button type="button" onClick={() => setCopyModalRole(null)} className="text-xl font-bold text-slate-400 hover:text-slate-700">×</button>
+              </div>
+
+              <div className="mt-4">
+                <p className="text-sm text-slate-650">
+                  ¿Deseas copiar el cargo <strong className="text-slate-800">{copyModalRole.name}</strong> a tu empresa?
+                </p>
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Se creará un nuevo cargo en tu organización con la misma estructura y asignación de permisos.
+                </p>
+
+                <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-4">
+                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2.5">Alcance y Permisos del Cargo</h4>
+                  <div className="text-xs text-slate-705 space-y-1 mb-3">
+                    <div><span className="font-semibold">Alcance (Scope):</span> <span className="rounded-md bg-blue-50 text-blue-600 px-1.5 py-0.5 font-bold uppercase">{scopes.find(s => s.id === copyModalRole.scope)?.value ?? copyModalRole.scope}</span></div>
+                    {copyModalRole.description && (
+                      <div><span className="font-semibold">Descripción:</span> {copyModalRole.description}</div>
+                    )}
+                  </div>
+
+                  <pre className="max-h-[220px] overflow-y-auto border border-slate-200 rounded-lg p-3 bg-slate-900 text-emerald-400 font-mono text-[11px] leading-relaxed select-all">
+                    {generateAsciiPermissions(copyModalRole.permissions)}
+                  </pre>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setCopyModalRole(null)}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+                  disabled={saving}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmCopy}
+                  className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 text-sm font-semibold transition shadow-sm disabled:opacity-50"
+                  disabled={saving}
+                >
+                  {saving ? "Copiando..." : "Confirmar Copia"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {loading ? (
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-900/60 backdrop-blur-md transition-opacity duration-300">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-slate-100/80 flex flex-col items-center text-center">
+            <div className="relative mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600 shadow-sm animate-pulse">
+              <svg className="h-7 w-7 animate-spin text-blue-600" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            </div>
+            
+            <h3 className="text-base font-bold text-slate-800">Cargando datos del sistema</h3>
+            <p className="mt-1 text-xs text-slate-500 font-medium">Por favor, espera un momento. Esto puede tardar...</p>
+            
+            <p className="mt-4 text-xs font-semibold text-blue-650 tracking-wide animate-pulse">{loadingMessage}</p>
+            
+            <div className="mt-4 w-full bg-slate-100 rounded-full h-2.5 overflow-hidden border border-slate-200/50">
+              <div 
+                className="bg-blue-600 h-full rounded-full transition-all duration-300 ease-out" 
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            
+            <span className="mt-2 text-2xs font-bold text-slate-400">{progress}% completado</span>
           </div>
         </div>
       ) : null}

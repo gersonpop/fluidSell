@@ -1,11 +1,10 @@
-import {getServerSession} from "next-auth";
-import {redirect} from "next/navigation";
-import {authOptions} from "@/lib/auth-options";
 import {resolveLoginNavigation} from "@/server/loginAccess";
-import {listRecords, type ActorContext} from "@/server/pgDynamicDbStore";
+import {listRecords} from "@/server/pgDynamicDbStore";
 import {selectSidebarModulesFromDbRows} from "@/lib/sidebar-access";
 import {ProtectedSidebarLayout} from "@/components/protected-sidebar-layout";
 import {EmbeddedPattern} from "@/components/module-patterns/EmbeddedPattern";
+import {resolveUserContext} from "@/lib/server-session-helper";
+import {redirect} from "next/navigation";
 
 export type SettingModule = {
   id: string;
@@ -30,22 +29,11 @@ function toSort(value: unknown) {
 }
 
 export async function requireProtectedSettingContext(locale: string) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
-    redirect(`/${locale}`);
-  }
+  const {session, actor, companyName, userCargo, roleScope} = await resolveUserContext(locale);
 
   const provider = ((session.user as {provider?: "google" | "facebook" | "linkedin"}).provider ?? "google");
   const navigation = await resolveLoginNavigation(session.user.email, provider);
   if (navigation.flow === "FORM_REQUIRED") redirect(`/${locale}/onboarding`);
-
-  const rawRole = String((session.user as {role?: string}).role ?? "SU").trim().toLowerCase();
-  const role: "SU" | "cliente" = rawRole === "su" ? "SU" : "cliente";
-  const actor: ActorContext = {
-    actorId: session.user.email ?? session.user.name ?? "anonymous",
-    role,
-    companyId: (session.user as {companyId?: string | null}).companyId ?? null
-  };
 
   const rows = (await listRecords(actor, "modules", null)) as Array<Record<string, any>>;
   const modules: SettingModule[] = rows.map((row) => ({
@@ -63,7 +51,7 @@ export async function requireProtectedSettingContext(locale: string) {
 
   const initialSidebarModules = selectSidebarModulesFromDbRows(rows);
 
-  return {session, actor, modules, initialSidebarModules, rows};
+  return {session, actor, companyName, userCargo, roleScope, modules, initialSidebarModules, rows};
 }
 
 type LayoutProps = {
@@ -73,7 +61,7 @@ type LayoutProps = {
 
 export default async function DynamicEmbeddedLayout({params, children}: LayoutProps) {
   const {locale} = await params;
-  const {session, actor, initialSidebarModules, rows} = await requireProtectedSettingContext(locale);
+  const {session, actor, companyName, userCargo, roleScope, initialSidebarModules, rows} = await requireProtectedSettingContext(locale);
 
   const currentRoute = "/setting";
   const currentModule = rows.find(m => m.route === currentRoute && m.status === "active");
@@ -102,6 +90,9 @@ export default async function DynamicEmbeddedLayout({params, children}: LayoutPr
       actorId={actor.actorId}
       actorRole={actor.role}
       companyId={actor.companyId}
+      companyName={companyName}
+      userCargo={userCargo}
+      roleScope={roleScope}
       initialModules={initialSidebarModules}
       title={currentModule ? toText(currentModule.name) : "setting"}
       description={currentModule ? toText(currentModule.description) : ""}

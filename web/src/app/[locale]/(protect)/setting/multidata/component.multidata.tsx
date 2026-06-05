@@ -2,6 +2,7 @@
 
 import {useCallback, useEffect, useMemo, useState} from "react";
 import {useTranslations} from "next-intl";
+import {getSecureItem} from "@/lib/secure-store";
 
 type Props = {
   actorId: string;
@@ -13,6 +14,21 @@ const DEFAULT_COLUMNS = ["id", "name", "value", "type", "actions"];
 
 export function DataManager({actorId, actorRole, companyId}: Props) {
   const t = useTranslations("AccountConfig");
+  const permissions = useMemo(() => {
+    if (actorRole === "SU") {
+      return { read: true, create: true, update: true, delete: true };
+    }
+    const cacheKey = `sidebar_modules_${actorId}_${companyId ?? ""}`;
+    const modules = getSecureItem<any[]>(cacheKey, actorId);
+    if (modules && Array.isArray(modules)) {
+      const match = modules.find((m) => m.route === "/setting/multidata");
+      if (match && match.permission) {
+        return match.permission as { read: boolean; create: boolean; update: boolean; delete: boolean };
+      }
+    }
+    return { read: true, create: false, update: false, delete: false };
+  }, [actorId, actorRole, companyId]);
+
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -224,7 +240,7 @@ export function DataManager({actorId, actorRole, companyId}: Props) {
     return filteredRows.slice(start, start + rowsPerPage);
   }, [filteredRows, safePage, rowsPerPage]);
 
-  const headerColumns = useMemo(() => allColumns.filter((column) => visibleColumns.has(column.key)), [allColumns, visibleColumns]);
+  const headerColumns = useMemo(() => allColumns.filter((column) => visibleColumns.has(column.key) && (column.key !== "actions" || permissions.update || permissions.delete)), [allColumns, visibleColumns, permissions.update, permissions.delete]);
 
   const filteredTypeRowsForForm = useMemo(
     () => rows.filter((item) => String(item?.type || "") === String(form.type || "") && (!form.language || String(item?.language || "") === String(form.language || ""))),
@@ -419,7 +435,9 @@ export function DataManager({actorId, actorRole, companyId}: Props) {
                 </div>
               ) : null}
             </div>
-            <button type="button" onClick={openAddDrawer} className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700">Agregar</button>
+            {permissions.create && (
+              <button type="button" onClick={openAddDrawer} className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700">Agregar</button>
+            )}
           </div>
         </div>
 
@@ -465,7 +483,7 @@ export function DataManager({actorId, actorRole, companyId}: Props) {
               <tbody>
                 {pagedRows.map((row, index) => (
                   <tr key={`${row?.id || row?.value || "row"}-${index}`} className="border-t border-slate-100">
-                    {headerColumns.map((column) => {
+                    {headerColumns.filter(c => visibleColumns.has(c.key)).map((column) => {
                       if (column.key === "id") return <td key={`id-${index}`} className="px-4 py-3">{row?.id ?? (safePage - 1) * rowsPerPage + index + 1}</td>;
                       if (column.key === "created_at") return <td key={`created-${index}`} className="px-4 py-3">{row?.created_at ? new Date(row.created_at).toLocaleString() : "-"}</td>;
                       if (column.key === "updated_at") return <td key={`updated-${index}`} className="px-4 py-3">{row?.updated_at ? new Date(row.updated_at).toLocaleString() : "-"}</td>;
@@ -474,37 +492,41 @@ export function DataManager({actorId, actorRole, companyId}: Props) {
                           <td key={`actions-${index}`} className="px-4 py-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
                               {/* Editar (Lápiz Azul) */}
-                              <div className="group relative">
-                                <button
-                                  type="button"
-                                  onClick={() => openEditDrawer(row)}
-                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 shadow-sm hover:bg-blue-100 hover:border-blue-300 hover:text-blue-700 transition duration-150"
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" className="h-4.5 w-4.5">
-                                    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-                                    <path d="m15 5 4 4" />
-                                  </svg>
-                                </button>
-                                <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
-                                  {t("actions.edit")}
-                                </span>
-                              </div>
+                              {permissions.update && (
+                                <div className="group relative">
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditDrawer(row)}
+                                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 shadow-sm hover:bg-blue-100 hover:border-blue-300 hover:text-blue-700 transition duration-150"
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" className="h-4.5 w-4.5">
+                                      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                                      <path d="m15 5 4 4" />
+                                    </svg>
+                                  </button>
+                                  <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                    {t("actions.edit")}
+                                  </span>
+                                </div>
+                              )}
 
                               {/* Eliminar (Basura Roja) */}
-                              <div className="group relative">
-                                <button
-                                  type="button"
-                                  onClick={() => void deleteItem(row?.value)}
-                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 shadow-sm hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 transition duration-150"
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4.5 w-4.5">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                                  </svg>
-                                </button>
-                                <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
-                                  Eliminar
-                                </span>
-                              </div>
+                              {permissions.delete && (
+                                <div className="group relative">
+                                  <button
+                                    type="button"
+                                    onClick={() => void deleteItem(row?.value)}
+                                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 shadow-sm hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 transition duration-150"
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4.5 w-4.5">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                                    </svg>
+                                  </button>
+                                  <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                    Eliminar
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           </td>
                         );

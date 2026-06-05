@@ -14,9 +14,10 @@ type PendingUser = {
 
 type Props = {
   initialPending: PendingUser[];
+  actorId: string;
 };
 
-export function PendingUsersClient({initialPending}: Props) {
+export function PendingUsersClient({initialPending, actorId}: Props) {
   const [items, setItems] = useState(initialPending);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +27,10 @@ export function PendingUsersClient({initialPending}: Props) {
     setError(null);
     const response = await fetch(`/api/v1/admin/users/${encodeURIComponent(userId)}/${action}`, {
       method: "POST",
-      headers: {"x-actor-id": "admin-ui"}
+      headers: {
+        "x-actor-id": actorId,
+        "content-type": "application/json"
+      }
     });
     const data = await response.json();
     setBusyId(null);

@@ -1,10 +1,8 @@
-import {getServerSession} from "next-auth";
-import {redirect} from "next/navigation";
-import {authOptions} from "@/lib/auth-options";
-import {listRecords, type ActorContext} from "@/server/pgDynamicDbStore";
+import {listRecords} from "@/server/pgDynamicDbStore";
 import {selectSidebarModulesFromDbRows} from "@/lib/sidebar-access";
 import {ProtectedSidebarLayout} from "@/components/protected-sidebar-layout";
 import {EmbeddedPattern} from "@/components/module-patterns/EmbeddedPattern";
+import {resolveUserContext} from "@/lib/server-session-helper";
 
 type LayoutProps = {
   params: Promise<{locale: string}>;
@@ -13,29 +11,7 @@ type LayoutProps = {
 
 export default async function DynamicEmbeddedLayout({params, children}: LayoutProps) {
   const {locale} = await params;
-  let session = await getServerSession(authOptions);
-  if (process.env.NODE_ENV === "development" && !session) {
-    session = {
-      user: {
-        name: "Dev User",
-        email: "gerson.pop@fluidsell.com",
-        image: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=256&auto=format&fit=crop",
-        role: "SU",
-        companyId: "900000000",
-        provider: "google"
-      },
-      expires: "2026-06-30T00:00:00.000Z"
-    } as any;
-  }
-  if (!session?.user) redirect("/" + locale);
-
-  const rawRole = String((session.user as {role?: string}).role ?? "SU").trim().toLowerCase();
-  const role: "SU" | "cliente" = rawRole === "su" ? "SU" : "cliente";
-  const actor: ActorContext = {
-    actorId: session.user.email ?? session.user.name ?? "anonymous",
-    role,
-    companyId: (session.user as {companyId?: string | null}).companyId ?? null
-  };
+  const {session, actor, companyName, userCargo, roleScope} = await resolveUserContext(locale);
 
   const rows = (await listRecords(actor, "modules", null)) as Array<Record<string, any>>;
   const initialSidebarModules = selectSidebarModulesFromDbRows(rows);
@@ -67,6 +43,9 @@ export default async function DynamicEmbeddedLayout({params, children}: LayoutPr
       actorId={actor.actorId}
       actorRole={actor.role}
       companyId={actor.companyId}
+      companyName={companyName}
+      userCargo={userCargo}
+      roleScope={roleScope}
       initialModules={initialSidebarModules}
       title={currentModule?.name ?? "users"}
       description={currentModule?.description ?? ""}

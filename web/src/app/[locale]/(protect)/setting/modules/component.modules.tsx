@@ -4,6 +4,7 @@ import {useCallback, useEffect, useMemo, useState} from "react";
 import Image from "next/image";
 import {useTranslations} from "next-intl";
 import {useRouter} from "next/navigation";
+import {getSecureItem} from "@/lib/secure-store";
 
 type ModuleAction = {
   id: string;
@@ -81,6 +82,21 @@ const defaultForm = {
 
 export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
   const t = useTranslations("AccountConfig");
+  const permissions = useMemo(() => {
+    if (actorRole === "SU") {
+      return { read: true, create: true, update: true, delete: true };
+    }
+    const cacheKey = `sidebar_modules_${actorId}_${companyId ?? ""}`;
+    const modules = getSecureItem<any[]>(cacheKey, actorId);
+    if (modules && Array.isArray(modules)) {
+      const match = modules.find((m) => m.route === "/setting/modules");
+      if (match && match.permission) {
+        return match.permission as { read: boolean; create: boolean; update: boolean; delete: boolean };
+      }
+    }
+    return { read: true, create: false, update: false, delete: false };
+  }, [actorId, actorRole, companyId]);
+
   const router = useRouter();
   const [modules, setModules] = useState<ModuleItem[]>([]);
   const [scopes, setScopes] = useState<ScopeItem[]>([]);
@@ -367,7 +383,7 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
     ],
     [t]
   );
-  const headerColumns = useMemo(() => tableColumns.filter((column) => visibleColumns.has(column.key)), [tableColumns, visibleColumns]);
+  const headerColumns = useMemo(() => tableColumns.filter((column) => visibleColumns.has(column.key) && (column.key !== "actions" || permissions.update || permissions.delete)), [tableColumns, visibleColumns, permissions.update, permissions.delete]);
 
   function toggleColumn(columnKey: string) {
     setVisibleColumns((prev) => {
@@ -640,10 +656,12 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
       return (
         <div
           key={`left-${module.id}`}
-          className={`cursor-pointer rounded-xl border p-2.5 shadow-sm transition hover:shadow-md ${cardStyle}`}
+          className={`${permissions.update ? "cursor-pointer" : ""} rounded-xl border p-2.5 shadow-sm transition hover:shadow-md ${cardStyle}`}
           onClick={(event) => {
-            event.stopPropagation();
-            onEdit(module);
+            if (permissions.update) {
+              event.stopPropagation();
+              onEdit(module);
+            }
           }}
         >
           <div className="flex min-h-8 items-center justify-between gap-2">
@@ -659,18 +677,20 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
               )}
               <p className="truncate text-xs font-bold uppercase tracking-wider">{moduleName}</p>
             </div>
-            <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-              <button
-                type="button"
-                className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white hover:bg-blue-700 transition"
-                title="Agregar submódulo"
-                onClick={() => {
-                  openCreateFormWithPreset(module.id, module.destination || "");
-                }}
-              >
-                +
-              </button>
-            </div>
+            {permissions.create && (
+              <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white hover:bg-blue-700 transition"
+                  title="Agregar submódulo"
+                  onClick={() => {
+                    openCreateFormWithPreset(module.id, module.destination || "");
+                  }}
+                >
+                  +
+                </button>
+              </div>
+            )}
           </div>
           <div className="mt-2 space-y-2 border-l-2 border-slate-200/60 pl-3.5">
             {children.map((child) => renderLeftNode(child, nextVisited))}
@@ -683,10 +703,12 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
       return (
         <div
           key={`left-${module.id}`}
-          className={`flex min-h-8 cursor-pointer items-center justify-between gap-2 rounded-xl border p-2 shadow-sm transition hover:shadow-md ${cardStyle}`}
+          className={`flex min-h-8 ${permissions.update ? "cursor-pointer" : ""} items-center justify-between gap-2 rounded-xl border p-2 shadow-sm transition hover:shadow-md ${cardStyle}`}
           onClick={(event) => {
-            event.stopPropagation();
-            onEdit(module);
+            if (permissions.update) {
+              event.stopPropagation();
+              onEdit(module);
+            }
           }}
         >
           <div className="flex min-w-0 items-center gap-2">
@@ -701,18 +723,20 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
             )}
             <p className="truncate text-xs font-medium text-slate-500">{moduleName} (Vacío)</p>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white hover:bg-blue-700 transition"
-              title="Agregar submódulo"
-              onClick={() => {
-                openCreateFormWithPreset(module.id, module.destination || "");
-              }}
-            >
-              +
-            </button>
-          </div>
+          {permissions.create && (
+            <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white hover:bg-blue-700 transition"
+                title="Agregar submódulo"
+                onClick={() => {
+                  openCreateFormWithPreset(module.id, module.destination || "");
+                }}
+              >
+                +
+              </button>
+            </div>
+          )}
         </div>
       );
     }
@@ -720,10 +744,12 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
     return (
       <div
         key={`left-${module.id}`}
-        className="flex min-h-8 cursor-pointer items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50/50 p-2 shadow-2xs hover:bg-slate-50 transition"
+        className={`flex min-h-8 ${permissions.update ? "cursor-pointer" : ""} items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50/50 p-2 shadow-2xs hover:bg-slate-50 transition`}
         onClick={(event) => {
-          event.stopPropagation();
-          onEdit(module);
+          if (permissions.update) {
+            event.stopPropagation();
+            onEdit(module);
+          }
         }}
       >
         <div className="flex min-w-0 items-center gap-2">
@@ -811,10 +837,12 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
       return (
         <div key={`aligned-${module.id}`} className="grid gap-4 lg:grid-cols-[280px_1fr] border border-slate-100/85 rounded-xl bg-slate-50/30 p-2.5">
           <div 
-            className="rounded-xl border border-emerald-100 bg-emerald-50/30 p-3 hover:bg-emerald-50/50 transition cursor-pointer shadow-2xs"
+            className={`rounded-xl border border-emerald-100 bg-emerald-50/30 p-3 ${permissions.update ? "hover:bg-emerald-50/50 cursor-pointer" : ""} transition shadow-2xs`}
             onClick={(event) => { 
-              event.stopPropagation(); 
-              onEdit(module); 
+              if (permissions.update) {
+                event.stopPropagation(); 
+                onEdit(module); 
+              }
             }}
           >
             <div className="flex items-center justify-between mb-2 pb-1 border-b border-emerald-100/50">
@@ -830,17 +858,19 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
                 )}
                 <p className="truncate text-xs font-bold uppercase tracking-wider text-emerald-950">{module.name}</p>
               </div>
-              <button
-                type="button"
-                className="flex h-4.5 w-4.5 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white hover:bg-blue-700 transition"
-                title="Agregar submódulo"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openCreateFormWithPreset(module.id, module.destination || "");
-                }}
-              >
-                +
-              </button>
+              {permissions.create && (
+                <button
+                  type="button"
+                  className="flex h-4.5 w-4.5 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white hover:bg-blue-700 transition"
+                  title="Agregar submódulo"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openCreateFormWithPreset(module.id, module.destination || "");
+                  }}
+                >
+                  +
+                </button>
+              )}
             </div>
             
             <div className="space-y-1.5 pl-1">
@@ -848,10 +878,12 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
                 return (
                   <div
                     key={`menu-${child.id}`}
-                    className="flex min-h-8 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs hover:bg-black/5 text-emerald-900/80 hover:text-emerald-950 font-medium transition"
+                    className={`flex min-h-8 ${permissions.update ? "cursor-pointer hover:bg-black/5 hover:text-emerald-950" : ""} items-center gap-2 rounded-lg px-2 text-xs text-emerald-900/80 font-medium transition`}
                     onClick={(event) => { 
-                      event.stopPropagation(); 
-                      onEdit(child); 
+                      if (permissions.update) {
+                        event.stopPropagation(); 
+                        onEdit(child); 
+                      }
                     }}
                   >
                     {child.icon ? (
@@ -1006,7 +1038,9 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
                   </div>
                 ) : null}
               </div>
-              <button onClick={openCreateForm} className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700">{t("controls.addModule")}</button>
+              {permissions.create && (
+                <button onClick={openCreateForm} className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700">{t("controls.addModule")}</button>
+              )}
             </div>
           </div>
 
@@ -1116,49 +1150,53 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
                             )}
 
                             {/* Editar (Lápiz Azul) */}
-                            <div className="group relative">
-                              <button
-                                type="button"
-                                onClick={() => onEdit(item)}
-                                className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 shadow-sm hover:bg-blue-100 hover:border-blue-300 hover:text-blue-700 transition duration-150"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" className="h-4.5 w-4.5">
-                                  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-                                  <path d="m15 5 4 4" />
-                                </svg>
-                              </button>
-                              <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
-                                {t("actions.edit")}
-                              </span>
-                            </div>
+                            {permissions.update && (
+                              <div className="group relative">
+                                <button
+                                  type="button"
+                                  onClick={() => onEdit(item)}
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 shadow-sm hover:bg-blue-100 hover:border-blue-300 hover:text-blue-700 transition duration-150"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" className="h-4.5 w-4.5">
+                                    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                                    <path d="m15 5 4 4" />
+                                  </svg>
+                                </button>
+                                <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                  {t("actions.edit")}
+                                </span>
+                              </div>
+                            )}
 
                             {/* Desactivar / Reactivar (Basura / Check) */}
-                            <div className="group relative">
-                              {item.status === "active" ? (
-                                <button
-                                  type="button"
-                                  onClick={() => void onChangeStatus(item, "inactive")}
-                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 shadow-sm hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 transition duration-150"
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4.5 w-4.5">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                                  </svg>
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => void onChangeStatus(item, "active")}
-                                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-600 shadow-sm hover:bg-emerald-100 hover:border-emerald-300 hover:text-emerald-700 transition duration-150"
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4.5 w-4.5">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-                                  </svg>
-                                </button>
-                              )}
-                              <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
-                                {item.status === "active" ? t("actions.deactivate") : t("actions.reactivate")}
-                              </span>
-                            </div>
+                            {permissions.delete && (
+                              <div className="group relative">
+                                {item.status === "active" ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => void onChangeStatus(item, "inactive")}
+                                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 shadow-sm hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 transition duration-150"
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4.5 w-4.5">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                                    </svg>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => void onChangeStatus(item, "active")}
+                                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-600 shadow-sm hover:bg-emerald-100 hover:border-emerald-300 hover:text-emerald-700 transition duration-150"
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4.5 w-4.5">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                                    </svg>
+                                  </button>
+                                )}
+                                <span className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 scale-95 opacity-0 pointer-events-none group-hover:scale-100 group-hover:opacity-100 transition duration-200 rounded border border-slate-200/60 bg-white/85 backdrop-blur px-2.5 py-1 text-2xs font-semibold text-slate-700 shadow-md whitespace-nowrap">
+                                  {item.status === "active" ? t("actions.deactivate") : t("actions.reactivate")}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </td>
                       );
@@ -1207,12 +1245,14 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
                     <h3 className="text-base font-bold text-slate-800">Vista Previa de la Jerarquía</h3>
                     <p className="text-xs text-slate-500">Módulos organizados según la estructura real del Sidebar de la aplicación.</p>
                   </div>
-                  <button
-                    onClick={openCreateForm}
-                    className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition"
-                  >
-                    {t("controls.addModule")}
-                  </button>
+                  {permissions.create && (
+                    <button
+                      onClick={openCreateForm}
+                      className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition"
+                    >
+                      {t("controls.addModule")}
+                    </button>
+                  )}
                 </div>
 
                 <div className="space-y-6">
@@ -1232,16 +1272,18 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
                               <p className="text-xs font-extrabold text-sky-950 uppercase tracking-wider">
                                 Aplicación {dest.label}
                               </p>
-                              <button
-                                type="button"
-                                className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white hover:bg-blue-700 transition"
-                                title="Agregar módulo raíz"
-                                onClick={() => {
-                                  openCreateFormWithPreset("/", dest.value);
-                                }}
-                              >
-                                +
-                              </button>
+                              {permissions.create && (
+                                <button
+                                  type="button"
+                                  className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white hover:bg-blue-700 transition"
+                                  title="Agregar módulo raíz"
+                                  onClick={() => {
+                                    openCreateFormWithPreset("/", dest.value);
+                                  }}
+                                >
+                                  +
+                                </button>
+                              )}
                             </div>
                             {renderMetaHeader()}
                           </div>

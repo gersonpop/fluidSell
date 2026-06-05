@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { getSecureItem, setSecureItem } from "@/lib/secure-store";
 
 // Claves de caché de cliente estandarizadas
 const MODULES_CACHE_KEY = "roles_modules_cache";
@@ -69,7 +70,31 @@ function renderModuleIcon(icon?: string | null) {
   return <span className="text-base">{icon}</span>;
 }
 
-export function DynamicComponent() {
+export function DynamicComponent({
+  actorId,
+  actorRole,
+  companyId
+}: {
+  actorId: string;
+  actorRole: string;
+  companyId: string;
+}) {
+
+  const userPermissions = useMemo(() => {
+    if (actorRole === "SU") {
+      return { read: true, create: true, update: true, delete: true };
+    }
+    const cacheKey = `sidebar_modules_${actorId}_${companyId ?? ""}`;
+    const modules = getSecureItem<any[]>(cacheKey, actorId);
+    if (modules && Array.isArray(modules)) {
+      const match = modules.find((m) => m.route === "/users/roles");
+      if (match && match.permission) {
+        return match.permission as { read: boolean; create: boolean; update: boolean; delete: boolean };
+      }
+    }
+    return { read: true, create: false, update: false, delete: false };
+  }, [actorId, actorRole, companyId]);
+
   const [dbModules, setDbModules] = useState<any[]>([]);
   const [roles, setRoles] = useState<RoleRecord[]>([]);
   const [scopesList, setScopesList] = useState<any[]>([]);
@@ -344,11 +369,11 @@ export function DynamicComponent() {
     () => ({
       Authorization: "Bearer local-dev-token",
       "x-oauth-session": "active",
-      "x-actor-id": "roles-ui",
-      "x-actor-role": "SU",
-      "x-company-id": ""
+      "x-actor-id": actorId,
+      "x-actor-role": actorRole,
+      "x-company-id": companyId ?? ""
     }),
-    []
+    [actorId, actorRole, companyId]
   );
 
   // 1. Cargar Módulos y Roles con Stale-While-Revalidate (LOCAL_DB_CACHE_MANUAL)
@@ -358,32 +383,18 @@ export function DynamicComponent() {
 
     // A. Cargar desde LocalStorage inmediatamente
     if (typeof window !== "undefined") {
-      const cachedModules = localStorage.getItem(MODULES_CACHE_KEY);
-      if (cachedModules) {
-        try {
-          const data = JSON.parse(cachedModules);
-          if (Array.isArray(data)) {
-            setDbModules(data);
-            hasLoadedModulesCache = true;
-          }
-        } catch {
-          // Ignorar y continuar
-        }
+      const dataModules = getSecureItem<any[]>(MODULES_CACHE_KEY, actorId);
+      if (dataModules && Array.isArray(dataModules)) {
+        setDbModules(dataModules);
+        hasLoadedModulesCache = true;
       }
 
-      const cachedRoles = localStorage.getItem(ROLES_CACHE_KEY);
-      if (cachedRoles) {
-        try {
-          const data = JSON.parse(cachedRoles);
-          if (Array.isArray(data)) {
-            setRoles(data);
-            hasLoadedRolesCache = true;
-            if (data.length > 0) {
-              setSelectedRoleId(data[0].id);
-            }
-          }
-        } catch {
-          // Ignorar
+      const dataRoles = getSecureItem<RoleRecord[]>(ROLES_CACHE_KEY, actorId);
+      if (dataRoles && Array.isArray(dataRoles)) {
+        setRoles(dataRoles);
+        hasLoadedRolesCache = true;
+        if (dataRoles.length > 0) {
+          setSelectedRoleId(dataRoles[0].id);
         }
       }
     }
@@ -433,8 +444,8 @@ export function DynamicComponent() {
 
         // Guardar en caché local
         if (typeof window !== "undefined") {
-          localStorage.setItem(MODULES_CACHE_KEY, JSON.stringify(fetchedModules));
-          localStorage.setItem(ROLES_CACHE_KEY, JSON.stringify(fetchedRoles));
+          setSecureItem(MODULES_CACHE_KEY, fetchedModules, actorId);
+          setSecureItem(ROLES_CACHE_KEY, fetchedRoles, actorId);
         }
 
       } catch (err) {
@@ -692,6 +703,33 @@ export function DynamicComponent() {
 
 
 
+  const syncContainerPermissions = (currentPerms: Record<string, Permission>) => {
+    const nextPerms = { ...currentPerms };
+    activeModules.forEach((item) => {
+      const hasChildren = activeModules.some((m) => m.parent === item.id);
+      if (hasChildren) {
+        const children = activeModules.filter((m) => m.parent === item.id);
+        const anyChildHasPerm = children.some((child) => {
+          const childPerm = nextPerms[child.id];
+          if (!childPerm) return false;
+          const hasCrud = childPerm.read || childPerm.create || childPerm.update || childPerm.delete;
+          const hasMicros = Object.values(childPerm.microroles || {}).some((v) => !!v);
+          return hasCrud || hasMicros;
+        });
+
+        nextPerms[item.id] = {
+          ...nextPerms[item.id],
+          read: anyChildHasPerm,
+          create: false,
+          update: false,
+          delete: false,
+          microroles: {}
+        };
+      }
+    });
+    return nextPerms;
+  };
+
   useEffect(() => {
     if (selectedRole) {
       setRoleForm({
@@ -708,7 +746,7 @@ export function DynamicComponent() {
       activeModules.forEach((m) => {
         newPerms[m.id] = savedPerms[m.id] || { read: false, create: false, update: false, delete: false, microroles: {} };
       });
-      setPermissions(newPerms);
+      setPermissions(syncContainerPermissions(newPerms));
     }
   }, [selectedRole, activeModules]);
 
@@ -736,7 +774,7 @@ export function DynamicComponent() {
                   clearedMicros[key] = false;
                 });
               }
-              return {
+              const updated = {
                 ...prev,
                 [moduleId]: {
                   ...currentPerm,
@@ -747,6 +785,7 @@ export function DynamicComponent() {
                   microroles: clearedMicros
                 }
               };
+              return syncContainerPermissions(updated);
             });
           },
           "Desactivar todos",
@@ -760,13 +799,15 @@ export function DynamicComponent() {
       const currentPerm = prev[moduleId] || { read: false, create: false, update: false, delete: false, microroles: {} };
       const nextVal = !currentPerm[type as keyof Permission];
 
-      // Auto-activar lectura si se otorga cualquier permiso del CRUD
+      // Auto-activar lectura si se otorga cualquier permiso del CRUD o permitir toggle manual
       let nextRead = currentPerm.read;
-      if (type !== "read" && nextVal) {
+      if (type === "read") {
+        nextRead = nextVal;
+      } else if (nextVal) {
         nextRead = true;
       }
 
-      return {
+      const updated = {
         ...prev,
         [moduleId]: {
           ...currentPerm,
@@ -774,6 +815,7 @@ export function DynamicComponent() {
           read: nextRead
         } as any
       };
+      return syncContainerPermissions(updated);
     });
   };
 
@@ -790,7 +832,7 @@ export function DynamicComponent() {
         nextRead = true;
       }
 
-      return {
+      const updated = {
         ...prev,
         [moduleId]: {
           ...modulePerm,
@@ -801,6 +843,7 @@ export function DynamicComponent() {
           }
         }
       };
+      return syncContainerPermissions(updated);
     });
   };
 
@@ -1372,21 +1415,25 @@ export function DynamicComponent() {
                               {/* CHECKBOXES DE PERMISOS */}
                               {(["read", "create", "update", "delete"] as Array<"read" | "create" | "update" | "delete">).map((type) => (
                                 <td key={type} className="py-3 text-center">
-                                  <button
-                                    type="button"
-                                    disabled={!isEditing}
-                                    onClick={() => handleCheckboxChange(item.id, type)}
-                                    className={`inline-flex h-5 w-5 items-center justify-center rounded-md border text-white transition focus:outline-none ${perm[type]
-                                        ? "bg-[#9b5de5] border-[#9b5de5] shadow-sm shadow-purple-200"
-                                        : "border-slate-200 hover:border-slate-300 bg-white"
-                                      } ${!isEditing ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
-                                  >
-                                    {perm[type] && (
-                                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="h-3 w-3">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                                      </svg>
-                                    )}
-                                  </button>
+                                  {hasChildren && type !== "read" ? (
+                                    <span className="text-slate-300 font-medium select-none">—</span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      disabled={!isEditing || (hasChildren && type === "read")}
+                                      onClick={() => handleCheckboxChange(item.id, type)}
+                                      className={`inline-flex h-5 w-5 items-center justify-center rounded-md border text-white transition focus:outline-none ${perm[type]
+                                          ? "bg-[#9b5de5] border-[#9b5de5] shadow-sm shadow-purple-200"
+                                          : "border-slate-200 hover:border-slate-300 bg-white"
+                                        } ${(!isEditing || (hasChildren && type === "read")) ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
+                                    >
+                                      {perm[type] && (
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="h-3 w-3">
+                                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                        </svg>
+                                      )}
+                                    </button>
+                                  )}
                                 </td>
                               ))}
 
@@ -1491,13 +1538,15 @@ export function DynamicComponent() {
             <div className="flex items-center justify-end gap-2 border-t border-slate-100 p-5 bg-slate-50/50 flex-shrink-0">
               {!isEditing ? (
                 <>
-                  <button
-                    type="button"
-                    onClick={() => setIsEditing(true)}
-                    className="rounded-xl bg-blue-600 px-6 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-md"
-                  >
-                    Editar Permisos
-                  </button>
+                  {userPermissions.update ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(true)}
+                      className="rounded-xl bg-blue-600 px-6 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-md"
+                    >
+                      Editar Permisos
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => setPermissionsModalOpen(false)}

@@ -722,7 +722,7 @@ export async function updateApprovalStatus(userId: string, actor: string, action
       );
 
       const roleRow = await getPool().query('SELECT name FROM public."Role" WHERE id = $1 LIMIT 1', [roleId]);
-      if (roleRow.rowCount > 0) {
+      if (roleRow.rows.length > 0) {
         const roleName = roleRow.rows[0].name;
         await getPool().query('UPDATE public."PlatformUser" SET position = $1 WHERE id_user_pk = $2', [roleName, platformUserId]);
       }

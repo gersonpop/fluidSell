@@ -91,7 +91,6 @@ model PlatformUser {
   avatar          String?
   departmentCode  String?  @map("department_code")
   cityCode        String?  @map("city_code")
-  userPermission  String?  @map("user_permission")
   sign            String?
   theme           String?
   status          String?

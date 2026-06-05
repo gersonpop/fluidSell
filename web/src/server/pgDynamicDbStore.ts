@@ -36,6 +36,7 @@ export type ActorContext = {
   actorId: string;
   role: ActorScope;
   companyId: string | null;
+  showAllCompanies?: boolean;
 };
 
 const TABLE_MAP = {
@@ -653,6 +654,74 @@ function hashPassword(password: string): string {
   return createHmac("sha256", "user-password-salt-98234").update(password).digest("hex");
 }
 
+async function createCompanyRecord(actor: ActorContext, payload: Record<string, unknown>) {
+  ensureSu(actor);
+  const legalName = payload.legalName ? String(payload.legalName).trim() : null;
+  const commercialName = String(payload.commercialName || "").trim();
+  const taxId = payload.taxId ? String(payload.taxId).trim() : null;
+  const sector = payload.sector ? String(payload.sector).trim() : null;
+  const country = payload.country ? String(payload.country).trim() : null;
+  const city = payload.city ? String(payload.city).trim() : null;
+  const zone = payload.zone ? String(payload.zone).trim() : null;
+  const address = payload.address ? String(payload.address).trim() : null;
+  const phone = payload.phone ? String(payload.phone).trim() : null;
+  const whatsapp = payload.whatsapp ? String(payload.whatsapp).trim() : null;
+  const email = payload.email ? String(payload.email).trim() : null;
+  const website = payload.website ? String(payload.website).trim() : null;
+  const status = String(payload.status || "TRIAL").trim().toUpperCase();
+
+  if (!commercialName) throw new Error("commercialName is required");
+
+  const id = `COMP-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+  const result = await getPgPool().query(
+    `INSERT INTO public."Company" (
+      id, "legalName", "commercialName", "taxId", sector, country, city, zone, address, phone, whatsapp, email, website, status, "createdAt", "updatedAt"
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now(),now()) returning *`,
+    [id, legalName, commercialName, taxId, sector, country, city, zone, address, phone, whatsapp, email, website, status]
+  );
+  return result.rows[0];
+}
+
+async function updateCompanyRecord(actor: ActorContext, id: string, patch: Record<string, unknown>) {
+  if (actor.role !== "SU" && actor.companyId !== id) {
+    throw new Error("Forbidden: No tienes permisos para editar otra compañía");
+  }
+
+  const current = await getPgPool().query('SELECT * FROM public."Company" WHERE id=$1 LIMIT 1', [id]);
+  if ((current.rowCount ?? 0) === 0) throw new Error("Company not found");
+
+  const row = current.rows[0];
+  const legalName = patch.legalName !== undefined ? (patch.legalName ? String(patch.legalName).trim() : null) : row.legalName;
+  const commercialName = patch.commercialName !== undefined ? String(patch.commercialName).trim() : row.commercialName;
+  const taxId = patch.taxId !== undefined ? (patch.taxId ? String(patch.taxId).trim() : null) : row.taxId;
+  const sector = patch.sector !== undefined ? (patch.sector ? String(patch.sector).trim() : null) : row.sector;
+  const country = patch.country !== undefined ? (patch.country ? String(patch.country).trim() : null) : row.country;
+  const city = patch.city !== undefined ? (patch.city ? String(patch.city).trim() : null) : row.city;
+  const zone = patch.zone !== undefined ? (patch.zone ? String(patch.zone).trim() : null) : row.zone;
+  const address = patch.address !== undefined ? (patch.address ? String(patch.address).trim() : null) : row.address;
+  const phone = patch.phone !== undefined ? (patch.phone ? String(patch.phone).trim() : null) : row.phone;
+  const whatsapp = patch.whatsapp !== undefined ? (patch.whatsapp ? String(patch.whatsapp).trim() : null) : row.whatsapp;
+  const email = patch.email !== undefined ? (patch.email ? String(patch.email).trim() : null) : row.email;
+  const website = patch.website !== undefined ? (patch.website ? String(patch.website).trim() : null) : row.website;
+  const status = patch.status !== undefined ? String(patch.status).trim().toUpperCase() : row.status;
+
+  if (!commercialName) throw new Error("commercialName is required");
+
+  const result = await getPgPool().query(
+    `UPDATE public."Company" SET
+      "legalName"=$1, "commercialName"=$2, "taxId"=$3, sector=$4, country=$5, city=$6, zone=$7, address=$8, phone=$9, whatsapp=$10, email=$11, website=$12, status=$13, "updatedAt"=now()
+    WHERE id=$14 returning *`,
+    [legalName, commercialName, taxId, sector, country, city, zone, address, phone, whatsapp, email, website, status, id]
+  );
+  return result.rows[0];
+}
+
+async function deleteCompanyRecord(actor: ActorContext, id: string) {
+  ensureSu(actor);
+  await getPgPool().query('DELETE FROM public."Company" WHERE id=$1', [id]);
+}
+
 async function createPlatformUserRecord(actor: ActorContext, payload: Record<string, unknown>) {
   ensureSu(actor);
   const email = String(payload.user_email || payload.email || "").trim().toLowerCase();
@@ -692,7 +761,10 @@ async function createPlatformUserRecord(actor: ActorContext, payload: Record<str
 }
 
 async function updatePlatformUserRecord(actor: ActorContext, id: string, patch: Record<string, unknown>) {
-  ensureSu(actor);
+  const dbUserId = await resolvePlatformUserId(actor.actorId);
+  if (actor.role !== "SU" && dbUserId !== id) {
+    throw new Error("Forbidden: You can only update your own user profile.");
+  }
   const current = await getPgPool().query('SELECT * FROM public."PlatformUser" WHERE id_user_pk=$1 LIMIT 1', [id]);
   if ((current.rowCount ?? 0) === 0) throw new Error("User not found");
 
@@ -876,7 +948,136 @@ function normalizeRoleScope(raw: string): string {
   return "User";
 }
 
+async function resolvePlatformUserId(actorId: string): Promise<string> {
+  if (actorId.includes("@")) {
+    const res = await getPgPool().query<{ id_user_pk: string }>(
+      'select id_user_pk from public."PlatformUser" where user_email = $1 limit 1',
+      [actorId]
+    );
+    if (res.rows.length > 0) {
+      return res.rows[0]!.id_user_pk;
+    }
+  }
+  return actorId;
+}
+
+async function getActorScopeLevel(actor: ActorContext): Promise<number> {
+  if (actor.role === "SU") {
+    return 4; // SU level
+  }
+  const dbUserId = await resolvePlatformUserId(actor.actorId);
+  const res = await getPgPool().query<{ scope: string }>(
+    `select r.scope 
+     from public."UserRole" ur 
+     join public."Role" r on r.id = ur."roleId" 
+     where ur.platform_user_id = $1 
+     limit 1`,
+    [dbUserId]
+  );
+  if (res.rows.length === 0) {
+    return 1; // default to User level
+  }
+  const scope = String(res.rows[0].scope || "User").trim().toLowerCase();
+  const levels: Record<string, number> = {
+    "su": 4,
+    "multicompany": 3,
+    "admin": 2,
+    "user": 1
+  };
+  return levels[scope] || 1;
+}
+
 async function createRoleRecord(actor: ActorContext, payload: Record<string, unknown>) {
+  const copyFromRoleId = payload.copyFromRoleId ? String(payload.copyFromRoleId).trim() : null;
+
+  if (copyFromRoleId) {
+    const srcRes = await getPgPool().query('SELECT * FROM public."Role" WHERE id = $1 LIMIT 1', [copyFromRoleId]);
+    if (srcRes.rows.length === 0) throw new Error("Source role not found");
+    const srcRole = srcRes.rows[0];
+
+    const targetLevels: Record<string, number> = { "su": 4, "multicompany": 3, "admin": 2, "user": 1 };
+    const targetLevel = targetLevels[srcRole.scope.toLowerCase()] || 1;
+    const actorLevel = await getActorScopeLevel(actor);
+    if (actorLevel <= 1) throw new Error("Forbidden: User scope cannot manage roles");
+    if ((actorLevel === 3 || actorLevel === 2) && targetLevel > 2) {
+      throw new Error("Forbidden: insufficient scope authority to copy this role");
+    }
+
+    const companyId = actor.role !== "SU" ? actor.companyId : String(payload.company_id || payload.companyId || actor.companyId || "900000000").trim();
+    if (!companyId) throw new Error("companyId is required to copy role");
+
+    let newKey = srcRole.key;
+    const checkKeyRes = await getPgPool().query('SELECT id FROM public."Role" WHERE "companyId" = $1 AND key = $2 LIMIT 1', [companyId, newKey]);
+    if (checkKeyRes.rows.length > 0) {
+      let i = 1;
+      while (true) {
+        const testKey = `${newKey.slice(0, 3)}_${i}`.toUpperCase().slice(0, 5);
+        const check = await getPgPool().query('SELECT id FROM public."Role" WHERE "companyId" = $1 AND key = $2 LIMIT 1', [companyId, testKey]);
+        if (check.rows.length === 0) {
+          newKey = testKey;
+          break;
+        }
+        i++;
+      }
+    }
+
+    const newRoleId = `ROL-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+    const srcPermsRes = await getPgPool().query(
+      'SELECT * FROM public."RolePermission" WHERE "roleId" = $1 AND status = \'active\'',
+      [copyFromRoleId]
+    );
+    
+    const newName = payload.name ? String(payload.name).trim() : `${srcRole.name} (Copia)`;
+    const newDesc = payload.description ? String(payload.description).trim() : srcRole.description;
+    
+    // Insert parent Role record first to satisfy foreign key constraints
+    await getPgPool().query(
+      'INSERT INTO public."Role" (id, "companyId", name, key, description, scope, "hashPermission", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())',
+      [newRoleId, companyId, newName, newKey, newDesc, srcRole.scope, ""]
+    );
+    
+    for (const p of srcPermsRes.rows) {
+      const newPermId = `RPM-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+      await getPgPool().query(
+        'INSERT INTO public."RolePermission" (id, "roleId", "moduleId", "canRead", "canCreate", "canUpdate", "canDelete", actions, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, \'active\')',
+        [newPermId, newRoleId, p.moduleId, p.canRead, p.canCreate, p.canUpdate, p.canDelete, typeof p.actions === 'string' ? p.actions : JSON.stringify(p.actions)]
+      );
+    }
+
+    // Recalculate hash signature and update the parent Role
+    const recalculatedHash = await calculateRolePermissionsHash(newRoleId);
+    await getPgPool().query(
+      'UPDATE public."Role" SET "hashPermission" = $1 WHERE id = $2',
+      [recalculatedHash, newRoleId]
+    );
+
+    const backupPermissions = srcPermsRes.rows.map((p) => ({
+      moduleId: p.moduleId,
+      canRead: p.canRead,
+      canCreate: p.canCreate,
+      canUpdate: p.canUpdate,
+      canDelete: p.canDelete,
+      actions: p.actions
+    }));
+    const backupCiphered = encryptBackup(JSON.stringify(backupPermissions));
+    await getPgPool().query(
+      'INSERT INTO public."RolePermissionSecurity" (id, "roleId", backup, "createdAt", "updatedAt") VALUES ($1, $2, $3, now(), now())',
+      [`SEC-${Date.now()}-${Math.floor(Math.random() * 10000)}`, newRoleId, backupCiphered]
+    );
+
+    return {
+      id: newRoleId,
+      key_id: newKey,
+      name: newName,
+      description: newDesc,
+      scope: srcRole.scope,
+      company_id: companyId,
+      status: "active",
+      permissions: {}
+    };
+  }
+
   const name = String(payload.name || "").trim();
   const key = String(payload.key_id || payload.key || "").trim().toUpperCase().slice(0, 5);
   const description = String(payload.description || "").trim();
@@ -884,6 +1085,24 @@ async function createRoleRecord(actor: ActorContext, payload: Record<string, unk
   const companyId = actor.role !== "SU" ? actor.companyId : String(payload.company_id || payload.companyId || "900000000").trim();
 
   if (!name || !key) throw new Error("name and key_id are required");
+
+  // Hierarchy validation
+  const actorLevel = await getActorScopeLevel(actor);
+  if (actorLevel <= 1) {
+    throw new Error("Forbidden: User scope cannot manage roles");
+  }
+  const targetLevels: Record<string, number> = {
+    "su": 4,
+    "multicompany": 3,
+    "admin": 2,
+    "user": 1
+  };
+  const targetLevel = targetLevels[scope.toLowerCase()] || 1;
+  if (actorLevel === 3 || actorLevel === 2) {
+    if (targetLevel > 2) {
+      throw new Error("Forbidden: insufficient scope authority to create this role");
+    }
+  }
 
   const id = `ROL-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
   const emptyHash = await calculateRolePermissionsHash(id);
@@ -968,6 +1187,26 @@ async function updateRoleRecord(actor: ActorContext, id: string, patch: Record<s
   const name = patch.name !== undefined ? String(patch.name).trim() : null;
   const description = patch.description !== undefined ? String(patch.description).trim() : null;
   const scope = patch.scope !== undefined ? normalizeRoleScope(String(patch.scope).trim()) : null;
+
+  // Hierarchy validation if updating scope
+  if (scope !== null) {
+    const actorLevel = await getActorScopeLevel(actor);
+    if (actorLevel <= 1) {
+      throw new Error("Forbidden: User scope cannot manage roles");
+    }
+    const targetLevels: Record<string, number> = {
+      "su": 4,
+      "multicompany": 3,
+      "admin": 2,
+      "user": 1
+    };
+    const targetLevel = targetLevels[scope.toLowerCase()] || 1;
+    if (actorLevel === 3 || actorLevel === 2) {
+      if (targetLevel > 2) {
+        throw new Error("Forbidden: insufficient scope authority to update this role");
+      }
+    }
+  }
 
   const updates: string[] = [];
   const values: any[] = [];
@@ -1092,9 +1331,19 @@ async function deleteRoleRecord(actor: ActorContext, id: string) {
 export async function listRecords(actor: ActorContext, tableParam: string, id: string | null) {
   const table = normalizeTable(tableParam);
 
+  if (table === "users" && id) {
+    const queryId = await resolvePlatformUserId(id);
+    const dbUserId = await resolvePlatformUserId(actor.actorId);
+    if (actor.role === "SU" || dbUserId === queryId) {
+      const result = await getPgPool().query('SELECT * FROM public."PlatformUser" WHERE id_user_pk=$1', [queryId]);
+      return result.rows;
+    }
+  }
+
   const isStaticTable = ["modules", "st_multidata", "st_country", "st_state", "st_city"].includes(table);
   if (isStaticTable && !id) {
-    const cached = staticStoreCache[table];
+    const cacheKey = table === "modules" ? `modules_${actor.actorId}` : table;
+    const cached = staticStoreCache[cacheKey];
     if (cached && cached.expiresAt > Date.now()) {
       return cached.data;
     }
@@ -1103,16 +1352,17 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
   if (table === "roles") {
     let query = 'select * from public."Role"';
     const values: string[] = [];
+    const shouldFilterCompany = actor.companyId && (actor.role !== "SU" || !actor.showAllCompanies);
     if (id) {
       query += ' where id=$1';
       values.push(id);
-      if (actor.companyId) {
+      if (shouldFilterCompany) {
         query += ' and "companyId"=$2';
-        values.push(actor.companyId);
+        values.push(actor.companyId!);
       }
-    } else if (actor.companyId) {
+    } else if (shouldFilterCompany) {
       query += ' where "companyId"=$1';
-      values.push(actor.companyId);
+      values.push(actor.companyId!);
     }
     query += ' order by name asc';
     const roleRows = await getPgPool().query(query, values);
@@ -1188,46 +1438,118 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
       rawModules = all.rows;
     }
 
-    let actRole = "user";
+    let actScope = "User";
+    let actorRoleId: string | null = null;
+
     if (actor.role === "SU") {
-      actRole = "su";
+      actScope = "SU";
     } else {
-      const userRoleScopeRes = await getPgPool().query<{ scope: string }>(
-        `select r.scope 
-         from public."UserRole" ur 
-         join public."Role" r on r.id = ur."roleId" 
-         where ur.platform_user_id = $1 
-         limit 1`,
-        [actor.actorId]
+      // Resolve CUID from email actor.actorId before querying UserRole
+      const dbUserId = await resolvePlatformUserId(actor.actorId);
+      const userRoleDb = await getPgPool().query<{ roleId: string; hash_permission: string; company_id: string }>(
+        'select "roleId", hash_permission, company_id from public."UserRole" where platform_user_id = $1 limit 1',
+        [dbUserId]
       );
-      if (userRoleScopeRes.rows.length > 0) {
-        actRole = String(userRoleScopeRes.rows[0].scope || "user").trim().toLowerCase();
+      if (userRoleDb.rows.length > 0) {
+        const ur = userRoleDb.rows[0]!;
+        const isValid = await validateRoleAssignmentSecurityHash(dbUserId, ur.hash_permission, ur.roleId, ur.company_id);
+        if (isValid) {
+          actorRoleId = ur.roleId;
+          const roleDb = await getPgPool().query<{ scope: string }>('select scope from public."Role" where id = $1 limit 1', [ur.roleId]);
+          if (roleDb.rows.length > 0) {
+            actScope = roleDb.rows[0]!.scope || "User";
+          }
+        }
+      }
+    }
+
+    const scopeLevels: Record<string, number> = {
+      "su": 4,
+      "multicompany": 3,
+      "admin": 2,
+      "user": 1
+    };
+    const actorLevel = scopeLevels[actScope.toLowerCase()] || 1;
+
+    // Load active permissions for this role if not SU
+    const permissionsMap = new Map<string, { read: boolean; create: boolean; update: boolean; delete: boolean }>();
+    if (actor.role !== "SU" && actorRoleId) {
+      const permRows = await getPgPool().query<{ moduleId: string; canRead: boolean; canCreate: boolean; canUpdate: boolean; canDelete: boolean }>(
+        'select "moduleId", "canRead", "canCreate", "canUpdate", "canDelete" from public."RolePermission" where "roleId"=$1 and "status"=\'active\'',
+        [actorRoleId]
+      );
+      for (const p of permRows.rows) {
+        permissionsMap.set(p.moduleId, {
+          read: p.canRead,
+          create: p.canCreate,
+          update: p.canUpdate,
+          delete: p.canDelete
+        });
       }
     }
 
     const multidataRes = await getPgPool().query<{ Initials_PK: string; value: string }>(
       'select "Initials_PK", "value" from public."st_Multidata"'
     );
-    const scopeMap = new Map<string, string>();
+    const scopeNameMap = new Map<string, string>();
     for (const mData of multidataRes.rows) {
-      scopeMap.set(String(mData.Initials_PK).toLowerCase(), String(mData.value).trim().toLowerCase());
+      scopeNameMap.set(String(mData.Initials_PK).toLowerCase(), String(mData.value).trim().toLowerCase());
     }
 
-    const filtered = rawModules.filter((m) => {
+    let filtered = rawModules.filter((m) => {
       const scopeId = String(m.scope_id || "").trim().toLowerCase();
-      const scopeVal = scopeMap.get(scopeId) || "";
+      const scopeVal = scopeNameMap.get(scopeId) || "user";
+      const moduleLevel = scopeLevels[scopeVal] || 1;
 
-      if (actRole === "su") {
-        return true;
+      // Hierarchy check
+      let allowed = actorLevel >= moduleLevel;
+
+      // Construct permissions object
+      let perm = { read: true, create: true, update: true, delete: true };
+      if (actor.role !== "SU") {
+        const userPerm = permissionsMap.get(m.id);
+        if (userPerm) {
+          perm = userPerm;
+        } else {
+          perm = { read: false, create: false, update: false, delete: false };
+        }
+
+        // Standard modules must have active read permission
+        if (m.page_content !== "section" && m.page_content !== "embedded") {
+          if (!perm.read) {
+            allowed = false;
+          }
+        }
       }
-      if (actRole === "admin" || actRole === "administrator" || actRole === "administrador") {
-        return scopeVal === "user" || scopeVal === "admin" || !scopeVal;
-      }
-      return scopeVal === "user" || !scopeVal;
+
+      // Attach permission directly to the module object
+      m.permission = perm;
+
+      return allowed;
     });
 
+    // Parent-Child visibility prune logic (sections and embedded containers must contain at least one visible child)
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const currentIds = new Set(filtered.map(m => m.id));
+
+      filtered = filtered.filter((m) => {
+        const isContainer = m.page_content === "section" || m.page_content === "embedded";
+        if (!isContainer) return true;
+
+        const hasChildren = filtered.some(child => child.parent === m.id && currentIds.has(child.id));
+        if (!hasChildren) {
+          changed = true;
+          return false;
+        }
+        return true;
+      });
+    }
+
     if (!id) {
-      staticStoreCache["modules"] = {
+      const cacheKey = `modules_${actor.actorId}`;
+      staticStoreCache[cacheKey] = {
         data: filtered,
         expiresAt: Date.now() + STATIC_CACHE_TTL_MS
       };
@@ -1291,14 +1613,23 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
   const pkColumn = PK_MAP[table] || 'id';
 
   if (id) {
+    const queryId = table === "users" ? await resolvePlatformUserId(id) : id;
     query += ` where "${pkColumn}"=$1`;
-    values.push(id);
+    values.push(queryId);
   }
-  if (actor.role !== "SU" && COMPANY_SCOPED_TABLES.has(table)) {
-    if (!actor.companyId) throw new Error("companyId is required for non-SU actors");
-    const companyCol = (table === "users" || table === "onboardings") ? '"companyId"' : 'companyid';
-    query += id ? ` and ${companyCol}=$2` : ` where ${companyCol}=$1`;
-    values.push(actor.companyId);
+  const isCompanyScoped = COMPANY_SCOPED_TABLES.has(table) || (table === "companies" && actor.role !== "SU");
+  const shouldFilterCompany = isCompanyScoped && !actor.showAllCompanies;
+  if (shouldFilterCompany) {
+    if (actor.role !== "SU" && !actor.companyId) {
+      throw new Error("companyId is required for non-SU actors");
+    }
+    if (actor.companyId) {
+      const companyCol = (table === "users" || table === "onboardings") 
+        ? '"companyId"' 
+        : (table === "companies" ? `"${pkColumn}"` : 'companyid');
+      query += id ? ` and ${companyCol}=$2` : ` where ${companyCol}=$1`;
+      values.push(actor.companyId);
+    }
   }
   const result = await getPgPool().query(query, values);
 
@@ -1313,7 +1644,7 @@ export async function listRecords(actor: ActorContext, tableParam: string, id: s
 
 export async function createRecord(actor: ActorContext, tableParam: string, payload: Record<string, unknown>) {
   const table = normalizeTable(tableParam);
-  if (["modules", "st_multidata", "st_country", "st_state", "st_city"].includes(table)) {
+  if (["modules", "st_multidata", "st_country", "st_state", "st_city", "companies"].includes(table)) {
     invalidateStoreCache(table);
   }
   if (table === "modules") return createModuleRecord(actor, payload);
@@ -1322,13 +1653,14 @@ export async function createRecord(actor: ActorContext, tableParam: string, payl
   if (table === "roles") return createRoleRecord(actor, payload);
   if (table === "role_assignments") return createRoleAssignmentRecord(actor, payload);
   if (table === "onboardings") return createOnboardingRecord(actor, payload);
+  if (table === "companies") return createCompanyRecord(actor, payload);
   ensureSu(actor);
   throw new Error(`Create is not enabled for table '${table}'`);
 }
 
 export async function updateRecord(actor: ActorContext, tableParam: string, id: string, patch: Record<string, unknown>) {
   const table = normalizeTable(tableParam);
-  if (["modules", "st_multidata", "st_country", "st_state", "st_city"].includes(table)) {
+  if (["modules", "st_multidata", "st_country", "st_state", "st_city", "companies"].includes(table)) {
     invalidateStoreCache(table);
   }
   if (table === "modules") return updateModuleRecord(actor, id, patch);
@@ -1337,13 +1669,14 @@ export async function updateRecord(actor: ActorContext, tableParam: string, id: 
   if (table === "roles") return updateRoleRecord(actor, id, patch);
   if (table === "role_assignments") return updateRoleAssignmentRecord(actor, id, patch);
   if (table === "onboardings") return updateOnboardingRecord(actor, id, patch);
+  if (table === "companies") return updateCompanyRecord(actor, id, patch);
   ensureSu(actor);
   throw new Error(`Update is not enabled for table '${table}'`);
 }
 
 export async function deleteRecord(actor: ActorContext, tableParam: string, id: string) {
   const table = normalizeTable(tableParam);
-  if (["modules", "st_multidata", "st_country", "st_state", "st_city"].includes(table)) {
+  if (["modules", "st_multidata", "st_country", "st_state", "st_city", "companies"].includes(table)) {
     invalidateStoreCache(table);
   }
   if (table === "modules") {
@@ -1368,6 +1701,10 @@ export async function deleteRecord(actor: ActorContext, tableParam: string, id: 
   }
   if (table === "onboardings") {
     await deleteOnboardingRecord(actor, id);
+    return;
+  }
+  if (table === "companies") {
+    await deleteCompanyRecord(actor, id);
     return;
   }
   ensureSu(actor);

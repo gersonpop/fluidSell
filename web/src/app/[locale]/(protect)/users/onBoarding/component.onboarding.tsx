@@ -7,6 +7,7 @@ const DEFAULT_COLUMNS = ["name", "email", "phoneNumber", "status", "actions"];
 export function OnboardingManager({ currentUserEmail, currentUserImage, currentUserProvider, isSU, currentUserCompanyId, currentUserRole }: { currentUserEmail?: string; currentUserImage?: string; currentUserProvider?: string; isSU?: boolean; currentUserCompanyId?: string; currentUserRole?: string }) {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAllCompanies, setShowAllCompanies] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [toasts, setToasts] = useState<Array<{
@@ -113,7 +114,8 @@ export function OnboardingManager({ currentUserEmail, currentUserImage, currentU
           "x-oauth-session": headers["x-oauth-session"],
           "x-actor-id": headers["x-actor-id"],
           "x-actor-role": headers["x-actor-role"],
-          "x-company-id": headers["x-company-id"]
+          "x-company-id": headers["x-company-id"],
+          ...(showAllCompanies ? { "x-show-all-companies": "true" } : {})
         },
         body: formData
       });
@@ -136,11 +138,12 @@ export function OnboardingManager({ currentUserEmail, currentUserImage, currentU
     () => ({
       Authorization: "Bearer local-dev-token",
       "x-oauth-session": "active",
-      "x-actor-id": "onboarding-manager-ui",
+      "x-actor-id": currentUserEmail ?? "onboarding-manager-ui",
       "x-actor-role": isSU ? "SU" : "cliente",
-      "x-company-id": currentUserCompanyId || ""
+      "x-company-id": currentUserCompanyId || "",
+      ...(showAllCompanies ? { "x-show-all-companies": "true" } : {})
     }),
-    [isSU, currentUserCompanyId]
+    [currentUserEmail, isSU, currentUserCompanyId, showAllCompanies]
   );
 
   const allColumns = useMemo(
@@ -510,6 +513,20 @@ export function OnboardingManager({ currentUserEmail, currentUserImage, currentU
             className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:bg-white lg:max-w-[44%]"
           />
           <div className="flex flex-wrap items-center gap-2">
+            {isSU && (
+              <label className="flex items-center gap-2 cursor-pointer select-none rounded-xl border border-cyan-200 bg-cyan-50/50 px-4 py-2 text-sm text-cyan-850 transition hover:bg-cyan-100/75">
+                <input
+                  type="checkbox"
+                  checked={showAllCompanies}
+                  onChange={(e) => {
+                    setShowAllCompanies(e.target.checked);
+                    setPage(1);
+                  }}
+                  className="rounded border-cyan-300 text-cyan-600 focus:ring-cyan-500 h-4 w-4"
+                />
+                <span className="font-bold text-cyan-900">Ver todas las compañías</span>
+              </label>
+            )}
             <select
               value={statusFilter}
               onChange={(event) => {

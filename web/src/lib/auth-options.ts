@@ -2,6 +2,8 @@ import type {NextAuthOptions} from "next-auth";
 import FacebookProvider from "next-auth/providers/facebook";
 import GoogleProvider from "next-auth/providers/google";
 import LinkedInProvider from "next-auth/providers/linkedin";
+import { decryptWithKey } from "@/server/pgDynamicDbStore";
+import { getPgPool } from "@/server/postgres";
 
 const providers = [];
 
@@ -80,6 +82,102 @@ export const authOptions: NextAuthOptions = {
       if (account?.provider) {
         token.provider = account.provider;
       }
+
+      // Query database to resolve role scope securely from the encrypted UserRole
+      if (token.email) {
+        try {
+          const pool = getPgPool();
+          const userRes = await pool.query(
+            'SELECT id_user_pk, username, "companyId", position, avatar FROM public."PlatformUser" WHERE user_email = $1 LIMIT 1',
+            [token.email]
+          );
+          if (userRes.rows.length > 0) {
+            const platformUser = userRes.rows[0];
+            const userId = platformUser.id_user_pk;
+            let companyId = platformUser.companyId;
+
+            token.userId = userId;
+            token.username = platformUser.username;
+            token.userCargo = platformUser.position || "Miembro";
+            if (platformUser.avatar) {
+              token.picture = platformUser.avatar;
+              token.image = platformUser.avatar;
+            }
+
+            const userRoleRes = await pool.query(
+              'SELECT ur."roleId", ur.hash_permission, ur.company_id, r.name as role_name ' +
+              'FROM public."UserRole" ur ' +
+              'LEFT JOIN public."Role" r ON ur."roleId" = r.id ' +
+              'WHERE ur.platform_user_id = $1 LIMIT 1',
+              [userId]
+            );
+
+            let isSU = false;
+            if (userRoleRes.rows.length > 0) {
+              const userRole = userRoleRes.rows[0];
+              const hashPermission = userRole.hash_permission;
+              if (userRole.role_name) {
+                token.userCargo = userRole.role_name;
+              }
+
+              if (hashPermission) {
+                const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "default-outer-salt-2849";
+                const outerKeyMaterial = `${userId}-${secret}`;
+                try {
+                  const decryptedJson = decryptWithKey(hashPermission, outerKeyMaterial);
+                  const payload = JSON.parse(decryptedJson);
+                  if (payload && payload.scope) {
+                    token.roleScope = payload.scope;
+                    token.role = payload.scope === "SU" ? "SU" : "cliente";
+                    if (payload.scope === "SU") {
+                      isSU = true;
+                    }
+                  }
+                } catch (decryptErr) {
+                  console.error("[SECURITY] Failed to decrypt user role signature for user:", userId, decryptErr);
+                }
+              }
+            }
+
+            if (isSU) {
+              try {
+                const { cookies } = await import("next/headers");
+                const cookieStore = await cookies();
+                const activeCompanyId = cookieStore.get("active_company_id")?.value;
+                if (activeCompanyId) {
+                  companyId = activeCompanyId;
+                }
+              } catch (cookieErr) {
+                console.error("Error reading active_company_id cookie in auth-options:", cookieErr);
+              }
+            }
+
+            token.companyId = companyId;
+
+            if (companyId) {
+              const compRes = await pool.query(
+                'SELECT "commercialName" FROM public."Company" WHERE id = $1 LIMIT 1',
+                [companyId]
+              );
+              if (compRes.rows.length > 0) {
+                token.companyName = compRes.rows[0].commercialName;
+              } else {
+                token.companyName = `Company ID: ${companyId}`;
+              }
+            }
+          }
+        } catch (dbErr) {
+          console.error("Error loading user role in auth-options:", dbErr);
+        }
+      }
+
+      if (!token.roleScope) {
+        token.roleScope = "User";
+      }
+      if (!token.role) {
+        token.role = token.roleScope === "SU" ? "SU" : "cliente";
+      }
+
       return token;
     },
     async session({session, token}) {
@@ -91,11 +189,33 @@ export const authOptions: NextAuthOptions = {
         if (tokenProvider) {
           (session.user as {provider?: string}).provider = tokenProvider;
         }
+        if (token.roleScope) {
+          (session.user as any).roleScope = token.roleScope;
+        }
+        if (token.role) {
+          (session.user as any).role = token.role;
+        }
+        if (token.companyId) {
+          (session.user as any).companyId = token.companyId;
+        }
+        if (token.companyName) {
+          (session.user as any).companyName = token.companyName;
+        }
+        if (token.userCargo) {
+          (session.user as any).userCargo = token.userCargo;
+        }
+        if (token.userId) {
+          (session.user as any).userId = token.userId;
+        }
+        if (token.username) {
+          (session.user as any).username = token.username;
+        }
       }
       return session;
     }
   },
   session: {
-    strategy: "jwt"
+    strategy: "jwt",
+    maxAge: 72 * 60 * 60 // 72 hours
   }
 };

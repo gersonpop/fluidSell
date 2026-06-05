@@ -22,7 +22,13 @@ function getActor(request: Request): ActorContext {
   const actorId = request.headers.get("x-actor-id") ?? "anonymous";
   const role = (request.headers.get("x-actor-role") ?? "cliente") as "SU" | "cliente";
   const companyId = request.headers.get("x-company-id");
-  return {actorId, role, companyId: companyId && companyId.length > 0 ? companyId : null};
+  const showAllCompanies = request.headers.get("x-show-all-companies") === "true";
+  return {
+    actorId,
+    role,
+    companyId: companyId && companyId.length > 0 ? companyId : null,
+    showAllCompanies
+  };
 }
 
 function withCors(response: NextResponse, request: Request) {

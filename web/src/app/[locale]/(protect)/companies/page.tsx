@@ -1,7 +1,7 @@
-import {getServerSession} from "next-auth";
+import {listRecords} from "@/server/pgDynamicDbStore";
+import {resolveUserContext} from "@/lib/server-session-helper";
+import {CompanyManager} from "./component.companies";
 import {redirect} from "next/navigation";
-import {authOptions} from "@/lib/auth-options";
-import {listRecords, type ActorContext} from "@/server/pgDynamicDbStore";
 
 type PageProps = {
   params: Promise<{locale: string}>;
@@ -9,16 +9,7 @@ type PageProps = {
 
 export default async function DynamicEmbeddedPage({params}: PageProps) {
   const {locale} = await params;
-  const session = await getServerSession(authOptions);
-  if (!session?.user) redirect("/" + locale);
-
-  const rawRole = String((session.user as {role?: string}).role ?? "SU").trim().toLowerCase();
-  const role: "SU" | "cliente" = rawRole === "su" ? "SU" : "cliente";
-  const actor: ActorContext = {
-    actorId: session.user.email ?? session.user.name ?? "anonymous",
-    role,
-    companyId: (session.user as {companyId?: string | null}).companyId ?? null
-  };
+  const {session, actor, companyName, userCargo, roleScope} = await resolveUserContext(locale);
 
   const rows = (await listRecords(actor, "modules", null)) as Array<Record<string, any>>;
   const currentRoute = "/companies";
@@ -32,9 +23,10 @@ export default async function DynamicEmbeddedPage({params}: PageProps) {
   }
 
   return (
-    <section className="h-full w-full rounded-2xl border border-slate-200 bg-white p-5 text-slate-700">
-      <h1 className="text-2xl font-semibold">{currentModule?.description || currentModule?.name || "companies"}</h1>
-      <p className="mt-2 text-sm text-slate-500">Módulo embebido. Agrega submódulos hijos para ver el contenido.</p>
-    </section>
+    <CompanyManager
+      currentUserEmail={session.user.email ?? undefined}
+      isSU={actor.role === "SU"}
+      currentUserCompanyId={actor.companyId ?? undefined}
+    />
   );
 }

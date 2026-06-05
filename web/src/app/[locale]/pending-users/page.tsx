@@ -20,19 +20,21 @@ export default async function PendingUsersPage({params}: PendingUsersPageProps) 
   const rawRole = String((session.user as {role?: string}).role ?? "SU").trim().toLowerCase();
   const role: "SU" | "cliente" = rawRole === "su" ? "SU" : "cliente";
 
+  const actorId = session.user.email ?? session.user.name ?? "anonymous";
+
   return (
     <ProtectedSidebarLayout
       locale={locale}
       userName={session.user.name ?? "Usuario"}
       userEmail={session.user.email ?? ""}
       userImage={session.user.image ?? null}
-      actorId={session.user.email ?? session.user.name ?? "anonymous"}
+      actorId={actorId}
       actorRole={role}
       companyId={(session.user as {companyId?: string | null}).companyId ?? null}
       title="Pendientes de alta"
       description="Revision y aprobacion de usuarios registrados por redes sociales."
     >
-      <PendingUsersClient initialPending={pending} />
+      <PendingUsersClient initialPending={pending} actorId={actorId} />
     </ProtectedSidebarLayout>
   );
 }
