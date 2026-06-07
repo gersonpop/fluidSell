@@ -99,6 +99,18 @@ export function CompanyManager({
 
   const [form, setForm] = useState(defaultForm);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof typeof defaultForm, string>>>({});
+  const [sectorsList, setSectorsList] = useState<any[]>([
+    { value: "Tecnología", name: "Tecnología" },
+    { value: "Retail / Comercio", name: "Retail / Comercio" },
+    { value: "Servicios", name: "Servicios" },
+    { value: "Manufactura", name: "Manufactura" },
+    { value: "Logística / Transporte", name: "Logística / Transporte" },
+    { value: "Salud", name: "Salud" },
+    { value: "Educación", name: "Educación" },
+    { value: "Construcción", name: "Construcción" },
+    { value: "Financiero", name: "Financiero" },
+    { value: "Alimentos y Bebidas", name: "Alimentos y Bebidas" }
+  ]);
 
   const headers = useMemo(
     () => ({
@@ -111,6 +123,20 @@ export function CompanyManager({
     }),
     [currentUserEmail, isSU, currentUserCompanyId, adminAllCompanies]
   );
+
+  useEffect(() => {
+    fetch("/api/v1/db/st_multidata", { headers })
+      .then(res => res.json())
+      .then(body => {
+        if (Array.isArray(body?.data)) {
+          const filtered = body.data.filter((item: any) => String(item?.type || "") === "companySector");
+          if (filtered.length > 0) {
+            setSectorsList(filtered);
+          }
+        }
+      })
+      .catch(err => console.error("Error loading sectors in companies:", err));
+  }, [headers]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -471,7 +497,7 @@ export function CompanyManager({
                   </tr>
                 ))}
                 {pagedRows.length === 0 && (
-                  <tr>
+                  <tr key="empty-companies">
                     <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
                       No se encontraron compañías
                     </td>
@@ -549,13 +575,22 @@ export function CompanyManager({
 
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide">Sector Comercial</label>
-              <input
-                type="text"
+              <select
                 value={form.sector}
                 disabled={!permissions.update}
                 onChange={(e) => setForm((prev) => ({ ...prev, sector: e.target.value }))}
-                className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-cyan-500 disabled:bg-slate-50 disabled:text-slate-500"
-              />
+                className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-cyan-500 disabled:bg-slate-50 disabled:text-slate-500 font-semibold bg-white"
+              >
+                <option value="">Seleccione un sector...</option>
+                {sectorsList.map((sec) => (
+                  <option key={sec.value} value={sec.value}>
+                    {sec.name}
+                  </option>
+                ))}
+                {form.sector && !sectorsList.some(s => s.value === form.sector) && (
+                  <option value={form.sector}>{form.sector}</option>
+                )}
+              </select>
             </div>
 
             <div>
@@ -734,12 +769,21 @@ export function CompanyManager({
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide">Sector Comercial</label>
-                  <input
-                    type="text"
+                  <select
                     value={form.sector}
                     onChange={(e) => setForm((prev) => ({ ...prev, sector: e.target.value }))}
-                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-cyan-500"
-                  />
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-cyan-500 bg-white"
+                  >
+                    <option value="">Seleccione un sector...</option>
+                    {sectorsList.map((sec) => (
+                      <option key={sec.value} value={sec.value}>
+                        {sec.name}
+                      </option>
+                    ))}
+                    {form.sector && !sectorsList.some(s => s.value === form.sector) && (
+                      <option value={form.sector}>{form.sector}</option>
+                    )}
+                  </select>
                 </div>
               </div>
 

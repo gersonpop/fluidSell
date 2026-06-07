@@ -24,7 +24,7 @@ export function OnboardingManager({ currentUserEmail, currentUserImage, currentU
     }, 4000);
   }, []);
 
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("pending_approval");
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
@@ -754,7 +754,7 @@ export function OnboardingManager({ currentUserEmail, currentUserImage, currentU
                     </tr>
                   ))}
                   {pagedRows.length === 0 ? (
-                    <tr>
+                    <tr key="empty-onboarding">
                       <td className="px-4 py-8 text-center text-slate-400" colSpan={headerColumns.length}>No se encontraron solicitudes que coincidan con los filtros.</td>
                     </tr>
                   ) : null}

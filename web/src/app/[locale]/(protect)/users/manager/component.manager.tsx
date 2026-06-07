@@ -809,7 +809,7 @@ export function DataManager({ currentUserEmail, currentUserImage, currentUserPro
                   </tr>
                 ))}
                 {pagedRows.length === 0 ? (
-                  <tr>
+                  <tr key="empty-users">
                     <td className="px-4 py-8 text-center text-slate-400" colSpan={headerColumns.length}>No se encontraron usuarios que coincidan con los filtros.</td>
                   </tr>
                 ) : null}

@@ -1698,13 +1698,13 @@ export function ProtectedSidebarLayout({
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {companiesLoading ? (
-                        <tr>
+                        <tr key="loading-companies">
                           <td colSpan={4} className="py-12 text-center text-sm text-slate-500 animate-pulse font-medium">
                             Cargando compañías...
                           </td>
                         </tr>
                       ) : sortedCompanies.length === 0 ? (
-                        <tr>
+                        <tr key="empty-companies">
                           <td colSpan={4} className="py-12 text-center text-sm text-slate-400">
                             No se encontraron compañías
                           </td>

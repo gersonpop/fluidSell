@@ -536,7 +536,7 @@ export function DataManager({actorId, actorRole, companyId}: Props) {
                   </tr>
                 ))}
                 {pagedRows.length === 0 ? (
-                  <tr>
+                  <tr key="empty-multidata">
                     <td className="px-4 py-6 text-slate-500" colSpan={headerColumns.length}>No hay resultados para el filtro actual.</td>
                   </tr>
                 ) : null}

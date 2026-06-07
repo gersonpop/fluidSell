@@ -906,7 +906,7 @@ export function PositionsConfigClient({actorId, actorRole, companyId}: Props) {
                   </tr>
                 ))}
                 {pagedRoles.length === 0 ? (
-                  <tr>
+                  <tr key="empty-positions">
                     <td colSpan={headerColumns.length} className="px-3 py-6 text-center text-slate-500">No hay cargos registrados.</td>
                   </tr>
                 ) : null}

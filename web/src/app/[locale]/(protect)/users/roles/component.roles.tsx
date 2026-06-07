@@ -1139,7 +1139,7 @@ export function DynamicComponent({
                 </tr>
               ))}
               {pagedRoles.length === 0 ? (
-                <tr>
+                <tr key="empty-roles">
                   <td colSpan={headerColumns.length} className="px-4 py-8 text-center text-slate-400 italic">No hay cargos que coincidan con los filtros de búsqueda.</td>
                 </tr>
               ) : null}

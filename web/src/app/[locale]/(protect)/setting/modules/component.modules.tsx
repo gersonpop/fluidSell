@@ -1204,7 +1204,7 @@ export function ModulesConfigClient({actorId, actorRole, companyId}: Props) {
                   </tr>
                 ))}
                 {pagedModules.length === 0 ? (
-                  <tr>
+                  <tr key="empty-modules">
                     <td colSpan={headerColumns.length} className="px-3 py-6 text-center text-slate-500">{t("table.empty")}</td>
                   </tr>
                 ) : null}
